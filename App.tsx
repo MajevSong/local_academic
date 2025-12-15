@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, Database, AlertCircle, Loader2, Sparkles, Filter, ArrowUpDown, Download, Layout, ChevronRight, Send, CheckSquare, Square, MessageSquare, Plus, ExternalLink, XCircle, FileText, Check, Library, Bookmark, BookOpen, Calendar, Hash, FileCheck, X, User, Bot, Trash2, PenTool, BookText, Wand2 } from 'lucide-react';
+import { Search, Database, AlertCircle, Loader2, Sparkles, Filter, ArrowUpDown, Download, Layout, ChevronRight, Send, CheckSquare, Square, MessageSquare, Plus, ExternalLink, XCircle, FileText, Check, Library, Bookmark, BookOpen, Calendar, Hash, FileCheck, X, User, Bot, Trash2, PenTool, BookText, Wand2, Copy, Code } from 'lucide-react';
 import { Paper, AnalysisResult, FilterState, ChatMessage } from './types';
 import { searchPapers } from './services/paperService';
 import { analyzePaperWithOllama, checkOllamaConnection, synthesizeFindings, chatWithPapers, generateLiteratureReview, generateTopicFromPapers } from './services/ollamaService';
@@ -512,43 +512,65 @@ const App: React.FC = () => {
       return;
     }
 
-    let markdownContent = `# Araştırma Raporu\n\n`;
-    markdownContent += `**Tarih:** ${new Date().toLocaleDateString('tr-TR')}\n`;
-    markdownContent += `**Kaynak:** Yerel Elicit\n\n---\n\n`;
+    // Generate Latex Content
+    let latexContent = `\\documentclass{article}
+\\usepackage[utf8]{inputenc}
+\\usepackage[T1]{fontenc}
+\\usepackage{geometry}
+\\usepackage{hyperref}
+\\usepackage{booktabs}
+\\geometry{a4paper, margin=1in}
+
+\\title{Araştırma Raporu}
+\\author{Yerel Elicit}
+\\date{\\today}
+
+\\begin{document}
+\\maketitle
+\\tableofcontents
+\\newpage
+
+\\section*{Seçilen Makaleler}
+`;
 
     targetPapers.forEach((paper, index) => {
       const analysis = analyses[paper.id];
       
-      markdownContent += `## ${index + 1}. ${paper.title}\n\n`;
-      markdownContent += `**Yazarlar:** ${paper.authors.join(', ')}\n`;
-      markdownContent += `**Yıl:** ${paper.year}\n`;
+      latexContent += `\\subsection*{${index + 1}. ${paper.title}}\n`;
+      latexContent += `\\textbf{Yazarlar:} ${paper.authors.join(', ')} \\\\\n`;
+      latexContent += `\\textbf{Yıl:} ${paper.year} \\\\\n`;
       if (paper.doi) {
-        markdownContent += `**DOI:** [${paper.doi}](https://doi.org/${paper.doi})\n`;
+        latexContent += `\\textbf{DOI:} \\href{https://doi.org/${paper.doi}}{${paper.doi}} \\\\\n`;
       }
-      markdownContent += `**Dergi/Kaynak:** ${paper.source}\n\n`;
+      latexContent += `\\textbf{Kaynak:} ${paper.source} \\\\\n\n`;
       
-      markdownContent += `### Özet (Abstract)\n${paper.abstract}\n\n`;
+      latexContent += `\\subsubsection*{Özet}\n${paper.abstract}\n\n`;
       
       if (analysis) {
          if (analysis.summary && visibleColumns.has('summary')) {
-            markdownContent += `### AI Özeti\n${analysis.summary}\n\n`;
+            latexContent += `\\subsubsection*{AI Özeti}\n${analysis.summary}\n\n`;
          }
          if (analysis.methodology && visibleColumns.has('methodology')) {
-            markdownContent += `### Metodoloji\n${analysis.methodology}\n\n`;
+            latexContent += `\\subsubsection*{Metodoloji}\n${analysis.methodology}\n\n`;
          }
          if (analysis.outcome && visibleColumns.has('outcome')) {
-            markdownContent += `### Bulgular\n${analysis.outcome}\n\n`;
+            latexContent += `\\subsubsection*{Bulgular}\n${analysis.outcome}\n\n`;
          }
       }
-      
-      markdownContent += `---\n\n`;
+      latexContent += `\\hrule\n\\vspace{0.5cm}\n\n`;
     });
 
-    const blob = new Blob([markdownContent], { type: 'text/markdown' });
+    latexContent += `\\end{document}`;
+
+    downloadStringAsFile(latexContent, 'research_report.tex');
+  };
+
+  const downloadStringAsFile = (content: string, filename: string) => {
+    const blob = new Blob([content], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'research_report.md';
+    a.download = filename;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -577,11 +599,12 @@ const App: React.FC = () => {
       )}
 
       {/* Navbar */}
-      <header className="h-14 border-b border-gray-200 flex items-center px-4 justify-between bg-white z-20 shrink-0">
-        <div className="flex items-center gap-4 flex-1">
-           <div className="flex items-center gap-2 font-bold text-lg text-gray-800 mr-4">
+      <header className="h-14 border-b border-gray-200 flex items-center px-4 justify-between bg-white z-20 shrink-0 gap-4">
+        {/* Left Side: Logo & Search */}
+        <div className="flex items-center gap-4 flex-1 min-w-0">
+           <div className="flex items-center gap-2 font-bold text-lg text-gray-800 shrink-0">
               <div className="bg-purple-600 p-1 rounded text-white"><Sparkles className="w-4 h-4" /></div>
-              Yerel Elicit
+              <span className="hidden sm:inline">Yerel Elicit</span>
            </div>
            
            {view !== 'write' && (
@@ -607,40 +630,43 @@ const App: React.FC = () => {
                   )}
                </form>
            )}
+        </div>
 
-           {/* View Toggles */}
-           <div className="flex items-center bg-gray-100 p-1 rounded-lg">
+        {/* Right Side: View Toggles & Status */}
+        <div className="flex items-center gap-3 shrink-0">
+            <div className="flex items-center bg-gray-100 p-1 rounded-lg">
              <button
                 onClick={() => setView('search')}
                 className={`flex items-center gap-2 px-3 py-1 rounded-md text-sm font-medium transition-all ${view === 'search' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
              >
                 <Search className="w-3.5 h-3.5" />
-                Arama
+                <span className="hidden md:inline">Arama</span>
              </button>
              <button
                 onClick={() => setView('library')}
                 className={`flex items-center gap-2 px-3 py-1 rounded-md text-sm font-medium transition-all ${view === 'library' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
              >
                 <Library className="w-3.5 h-3.5" />
-                Kitaplığım ({savedPapers.length})
+                <span className="hidden md:inline">Kitaplığım</span>
+                <span className="bg-gray-200 text-gray-600 px-1.5 py-0.5 rounded-full text-[10px] ml-1">{savedPapers.length}</span>
              </button>
              <button
                 onClick={() => setView('write')}
                 className={`flex items-center gap-2 px-3 py-1 rounded-md text-sm font-medium transition-all ${view === 'write' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
              >
                 <PenTool className="w-3.5 h-3.5" />
-                Yazım Asistanı
+                <span className="hidden md:inline">Yazım Asistanı</span>
              </button>
            </div>
-        </div>
+           
+           <div className="h-6 w-px bg-gray-200 mx-1 hidden sm:block"></div>
 
-        <div className="flex items-center gap-3 text-sm">
-           <div className={`flex items-center px-2 py-1 rounded text-xs font-medium ${ollamaStatus ? 'text-green-700 bg-green-50' : 'text-red-700 bg-red-50'}`}>
+           <div className={`flex items-center px-2 py-1 rounded text-xs font-medium hidden sm:flex ${ollamaStatus ? 'text-green-700 bg-green-50' : 'text-red-700 bg-red-50'}`}>
              <Database className="w-3 h-3 mr-1.5" />
-             {ollamaStatus ? 'Model Hazır' : 'Model Kapalı'}
+             {ollamaStatus ? 'Hazır' : 'Kapalı'}
            </div>
            <div className="h-8 w-8 bg-purple-100 rounded-full flex items-center justify-center text-purple-700 font-bold text-xs">
-             S
+             Y
            </div>
         </div>
       </header>
@@ -759,7 +785,7 @@ const App: React.FC = () => {
                 )}
               </div>
               
-              <ToolbarButton onClick={handleExport} icon={<Download className="w-3.5 h-3.5" />} label="Dışa Aktar" />
+              <ToolbarButton onClick={handleExport} icon={<Code className="w-3.5 h-3.5" />} label="LaTeX İndir" />
            </div>
            <div className="text-xs text-gray-500">
               {view === 'search' ? (
@@ -803,7 +829,7 @@ const App: React.FC = () => {
                               <div key={paper.id} className="bg-white p-3 rounded border border-gray-200 shadow-sm text-sm">
                                   <div className="font-bold text-gray-800 flex gap-2 justify-between">
                                       <div className="flex gap-2">
-                                        <span className="text-purple-600">[{idx + 1}]</span>
+                                        <span className="text-purple-600">[ref{idx + 1}]</span>
                                         {paper.title}
                                       </div>
                                       {paper.fullText && (
@@ -855,20 +881,42 @@ const App: React.FC = () => {
                       {!ollamaStatus && <p className="text-xs text-red-500 mt-2 flex items-center gap-1"><AlertCircle className="w-3 h-3"/> Ollama bağlantısı gerekli.</p>}
                    </div>
 
-                   <div className="flex-1 overflow-y-auto p-8 bg-gray-50/30">
+                   <div className="flex-1 overflow-y-auto p-0 bg-gray-50/30">
                       {generatedPaper ? (
-                          <div className="max-w-3xl mx-auto bg-white p-10 rounded-xl shadow-sm border border-gray-100 min-h-[500px] prose prose-sm prose-purple">
-                              <div className="whitespace-pre-wrap font-serif text-gray-800 leading-relaxed">
-                                  {generatedPaper}
+                          <div className="h-full flex flex-col">
+                              <div className="flex items-center justify-between px-6 py-2 bg-gray-100 border-b border-gray-200">
+                                  <span className="text-xs font-semibold text-gray-500 uppercase">LaTeX Çıktısı</span>
+                                  <div className="flex gap-2">
+                                      <button 
+                                        onClick={() => {
+                                            navigator.clipboard.writeText(generatedPaper);
+                                            alert("Kopyalandı!");
+                                        }}
+                                        className="text-gray-600 hover:text-gray-900 text-xs flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-200"
+                                      >
+                                          <Copy className="w-3 h-3" /> Kopyala
+                                      </button>
+                                      <button 
+                                        onClick={() => downloadStringAsFile(generatedPaper, 'literature_review.tex')}
+                                        className="text-purple-700 bg-purple-100 hover:bg-purple-200 text-xs font-medium flex items-center gap-1 px-3 py-1 rounded transition-colors"
+                                      >
+                                          <Download className="w-3 h-3" /> .tex İndir
+                                      </button>
+                                  </div>
                               </div>
+                              <textarea 
+                                readOnly
+                                className="flex-1 w-full p-6 font-mono text-sm bg-white text-gray-800 focus:outline-none resize-none"
+                                value={generatedPaper}
+                              />
                           </div>
                       ) : (
                           <div className="h-full flex flex-col items-center justify-center text-gray-400">
                               <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4">
-                                  <FileText className="w-8 h-8 text-gray-300" />
+                                  <Code className="w-8 h-8 text-gray-300" />
                               </div>
                               <h3 className="text-lg font-medium text-gray-600">Henüz Bir Taslak Yok</h3>
-                              <p className="text-sm mt-2 max-w-sm text-center">Konunuzu girin ve sol taraftaki kaynakları kullanarak akademik bir taslak oluşturun.</p>
+                              <p className="text-sm mt-2 max-w-sm text-center">Konunuzu girin ve sol taraftaki kaynakları kullanarak LaTeX formatında akademik bir makale oluşturun.</p>
                           </div>
                       )}
                    </div>

@@ -147,35 +147,71 @@ export const generateLiteratureReview = async (
   const contextPapers = papers.slice(0, limit);
   
   const context = contextPapers.map((p, i) => 
-    `Kaynak [${i+1}]:
+    `MAKALE_ID: ref${i+1}
      Başlık: ${p.title}
      Yazarlar: ${p.authors.join(", ")}
      Yıl: ${p.year}
      İçerik: ${getPaperContent(p)}`
   ).join("\n\n----------------\n\n");
 
-  const systemPrompt = `Sen etik kurallara sıkı sıkıya bağlı akademik bir yazarsın. 
-Görevin, SADECE sana sağlanan "Kaynak Listesi"ndeki makaleleri kullanarak verilen konu hakkında akademik bir yazı taslağı oluşturmaktır.
-Bazı kaynaklar için "Tam Metin" sağlanmış olabilir, bu durumda detayları (istatistikler, metodoloji adımları) mutlaka kullan.
+  const systemPrompt = `Sen profesyonel bir akademik yazarsın. Görevin, verilen kaynakları kullanarak "literatür taraması" (literature review) niteliğinde bir makale yazmaktır.
+Çıktı formatı KESİNLİKLE bir LaTeX dosyası olmalıdır. Kod bloğu kullanmadan, doğrudan LaTeX kodunu ver.
+
+Kullanılacak Yapı:
+\\documentclass{article}
+\\usepackage[utf8]{inputenc}
+\\usepackage{amsmath, amsfonts, amssymb}
+\\usepackage{graphicx}
+\\usepackage{booktabs}
+\\usepackage{hyperref}
+\\usepackage[numbers]{natbib}
+
+\\begin{document}
+
+\\title{...} % Konuya uygun başlık
+\\author{Yerel Elicit AI}
+\\date{\\today}
+
+\\maketitle
+
+\\begin{abstract}
+% Konuyu ve incelenen makalelerin genel bulgularını özetle.
+\\end{abstract}
+
+\\section{Giriş}
+% Konuyu tanıt ve neden önemli olduğunu açıkla.
+
+\\section{Literatür Taraması}
+% Kaynakları sentezleyerek anlat. Benzer çalışmaları grupla. 
+
+\\section{Metodoloji Sentezi}
+% İncelenen makalelerde kullanılan yöntemleri karşılaştır (örn. deneyler, anketler, yapay zeka modelleri).
+
+\\section{Bulgular ve Tartışma}
+% Makalelerin temel sonuçlarını ve bu sonuçların ne anlama geldiğini tartış.
+
+\\section{Sonuç}
+% Genel bir yargıya var.
+
+\\bibliographystyle{plainnat}
+\\begin{thebibliography}{99}
+% Buraya kaynakları ekle. Format: \\bibitem{refX} Yazarlar (Yıl). Başlık. Kaynak.
+\\end{thebibliography}
+
+\\end{document}
 
 Kurallar:
-1. Asla uydurma kaynak kullanma. Sadece aşağıda verilen kaynakları kullan.
-2. Metin içinde bilgi verirken mutlaka köşeli parantez ile atıf yap (Örn: [1], [3]).
-3. Çıktı formatı şu başlıkları içermelidir:
-   - Başlık (Konuya uygun akademik bir başlık)
-   - Özet (Abstract)
-   - 1. Giriş (Introduction)
-   - 2. İlgili Çalışmalar (Related Works) - Burada kaynakları karşılaştırarak sentezle.
-   - Kaynakça (References) - Metin içinde kullandığın numaralarla listele.
-
-Dil: Türkçe.`;
+1. İçerik dili TÜRKÇE olacaktır.
+2. Metin içinde atıf yaparken mutlaka \\cite{refX} kullan. Sana verilen listedeki 'ref1', 'ref2' ID'lerini kullan.
+3. Asla uydurma kaynak kullanma, sadece aşağıda verilenleri kullan.
+4. Tam metin içeriği varsa, istatistiksel verileri ve detayları kullanmaya özen göster.`;
 
   const userPrompt = `Konu: "${topic}"
 
-Kaynak Listesi:
+Kullanılacak Kaynak Listesi:
 ${context}
 
-Lütfen yukarıdaki kaynakları kullanarak bu konu hakkında akademik taslağı yaz.`;
+Lütfen yukarıdaki şablona uygun olarak LaTeX formatında makaleyi oluştur.`;
 
   const messages: ChatMessage[] = [
     { role: 'system', content: systemPrompt },
