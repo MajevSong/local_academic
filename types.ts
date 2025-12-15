@@ -7,6 +7,11 @@ export interface Paper {
   citationCount: number;
   url?: string;
   source: string;
+  savedAnalysis?: {
+    summary: string;
+    methodology: string;
+    outcome: string;
+  };
 }
 
 export interface AnalysisResult {

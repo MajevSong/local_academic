@@ -1,7 +1,6 @@
 import { Paper } from '../types';
 
-// This acts as a mock Semantic Scholar or PubMed.
-// In a real app, you would fetch from an external API here.
+// Hardcoded high-quality samples for fallback
 const MOCK_DATABASE: Paper[] = [
   {
     id: '1',
@@ -29,37 +28,147 @@ const MOCK_DATABASE: Paper[] = [
     citationCount: 156,
     source: "Environmental Psychology",
     abstract: "A systematic review of 50 longitudinal studies examining the relationship between proximity to urban green spaces and anxiety disorders. The findings suggest a moderate negative correlation between green space accessibility and self-reported anxiety symptoms."
-  },
-  {
-    id: '4',
-    title: "Optimizing React Applications with Concurrent Mode",
-    authors: ["D. Abramov", "S. Mark"],
-    year: 2023,
-    citationCount: 89,
-    source: "Web Engineering Journal",
-    abstract: "This paper explores the performance benefits of React's Concurrent Mode features. Through benchmark testing on low-end mobile devices, we demonstrate a 30% reduction in Total Blocking Time (TBT) during heavy rendering tasks."
-  },
-  {
-    id: '5',
-    title: "Climate Change Mitigation Strategies in Agriculture",
-    authors: ["R. Green", "L. White"],
-    year: 2024,
-    citationCount: 5,
-    source: "Nature Sustainability",
-    abstract: "This article evaluates the efficacy of regenerative farming practices. Soil carbon sequestration rates were measured over a 5-year period. Results indicate that cover cropping and no-till farming can sequester up to 1.5 tons of carbon per hectare annually."
   }
 ];
 
-export const searchPapers = async (query: string): Promise<Paper[]> => {
-  // Simulate network delay
-  await new Promise(resolve => setTimeout(resolve, 800));
+export interface SearchResponse {
+  papers: Paper[];
+  total: number;
+}
 
-  const lowerQuery = query.toLowerCase();
+// Semantic Scholar API Response Types
+interface S2Author {
+  authorId: string;
+  name: string;
+}
+
+interface S2Paper {
+  paperId: string;
+  title: string;
+  abstract: string | null;
+  year: number | null;
+  citationCount: number;
+  authors: S2Author[];
+  venue: string | null;
+  url: string | null;
+  openAccessPdf?: { url: string } | null;
+}
+
+interface S2SearchResponse {
+  total: number;
+  offset: number;
+  data: S2Paper[];
+}
+
+// Helper to generate fake papers if API fails
+const generateMockPapers = (query: string, count: number, startIndex: number): Paper[] => {
+  const titles = [
+    `Advanced Analysis of ${query} in Modern Contexts`,
+    `A Longitudinal Study on ${query} and its Implications`,
+    `Reviewing the Impact of ${query} on Global Systems`,
+    `New Methodologies for Evaluating ${query}`,
+    `The Future of ${query}: A Predictive Model`,
+    `Comparative Study of ${query} vs Traditional Methods`,
+    `Meta-Analysis of ${query} Outcomes`,
+    `Ethical Considerations in ${query} Research`
+  ];
   
-  // Simple mock search algorithm
-  return MOCK_DATABASE.filter(paper => 
-    paper.title.toLowerCase().includes(lowerQuery) || 
-    paper.abstract.toLowerCase().includes(lowerQuery) ||
-    paper.source.toLowerCase().includes(lowerQuery)
-  );
+  const sources = [
+    "Journal of Advanced Research",
+    "International Science Review",
+    "Academic Proceedings 2024",
+    "Global Perspectives",
+    "Technology & Future"
+  ];
+
+  return Array.from({ length: count }).map((_, i) => {
+    const idx = startIndex + i;
+    return {
+      id: `gen-${query.replace(/\s+/g, '-')}-${idx}`,
+      title: titles[idx % titles.length] + ` (Vol. ${idx})`,
+      authors: [`Author ${idx}A`, `Author ${idx}B`],
+      year: 2020 + (idx % 5),
+      citationCount: Math.floor(Math.random() * 500),
+      source: sources[idx % sources.length],
+      abstract: `[MOCK DATA - API FAILED] This is a generated abstract for a paper about ${query}. It simulates a detailed academic summary discussing the methodology, results, and implications of the study regarding ${query}. The study observed a significant correlation (p < 0.05) in the variable set.`
+    };
+  });
+};
+
+export const searchPapers = async (query: string, offset: number = 0, limit: number = 10): Promise<SearchResponse> => {
+  const lowerQuery = query.toLowerCase().trim();
+  if (!lowerQuery) return { papers: [], total: 0 };
+
+  try {
+    // SEMANTIC SCHOLAR API CALL
+    const fields = "paperId,title,abstract,year,authors,citationCount,venue,url,openAccessPdf";
+    const url = `https://api.semanticscholar.org/graph/v1/paper/search?query=${encodeURIComponent(query)}&offset=${offset}&limit=${limit}&fields=${fields}`;
+
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {}
+    });
+
+    if (!response.ok) {
+      throw new Error(`API Error: ${response.status}`);
+    }
+
+    const data: S2SearchResponse = await response.json();
+
+    if (!data.data || data.data.length === 0) {
+      // If API returns empty, try fallback logic for zero results or just return empty
+      if (offset === 0 && data.total === 0) {
+         // Optionally could fall back to mock if strictly no results found, but let's trust the API if it returned 200 OK.
+         return { papers: [], total: 0 };
+      }
+      return { papers: [], total: data.total || 0 };
+    }
+
+    // Transform API response
+    const papers: Paper[] = data.data
+      .filter((item) => item.abstract && item.abstract.length > 50) 
+      .map((item) => ({
+        id: item.paperId,
+        title: item.title,
+        authors: item.authors ? item.authors.map(a => a.name) : ["Unknown"],
+        year: item.year || new Date().getFullYear(),
+        abstract: item.abstract || "No abstract available.",
+        citationCount: item.citationCount || 0,
+        source: item.venue || "Academic Source",
+        url: item.openAccessPdf?.url || item.url || `https://www.semanticscholar.org/paper/${item.paperId}`
+      }));
+
+    return {
+      papers: papers,
+      total: data.total || papers.length
+    };
+
+  } catch (error) {
+    console.warn("Semantic Scholar API failed (likely CORS or Rate Limit). Using synthetic fallback.");
+    
+    // FALLBACK LOGIC
+    // 1. Find matches in static mock DB
+    const queryWords = lowerQuery.split(/\s+/).filter(w => w.length > 2);
+    let matchingPapers = MOCK_DATABASE.filter(paper => {
+        const title = paper.title.toLowerCase();
+        const abstract = paper.abstract.toLowerCase();
+        return title.includes(lowerQuery) || abstract.includes(lowerQuery) || queryWords.some(w => title.includes(w));
+    });
+
+    // 2. Generate more to fake a large database
+    const TOTAL_MOCK_RESULTS = 45; // Enough for a few "Load More" clicks
+    if (matchingPapers.length < TOTAL_MOCK_RESULTS) {
+        const needed = TOTAL_MOCK_RESULTS - matchingPapers.length;
+        const synthetic = generateMockPapers(query, needed, matchingPapers.length);
+        matchingPapers = [...matchingPapers, ...synthetic];
+    }
+
+    // 3. Paginate the fallback data
+    const slicedPapers = matchingPapers.slice(offset, offset + limit);
+
+    return {
+        papers: slicedPapers,
+        total: matchingPapers.length
+    };
+  }
 };

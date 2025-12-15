@@ -13,11 +13,8 @@ export const checkOllamaConnection = async (): Promise<boolean> => {
     });
     return response.ok;
   } catch (error) {
-    console.warn("Ollama connection check failed. Ensure Ollama is running with OLLAMA_ORIGINS=\"*\"");
-    // Detailed error logging for debugging
-    if (error instanceof TypeError) {
-        console.error("Network error details:", error.message);
-    }
+    // Suppress console.error here to avoid spamming the console during polling
+    // console.warn("Ollama connection check failed..."); 
     return false;
   }
 };
@@ -75,6 +72,7 @@ export const analyzePaperWithOllama = async (
     return data.message.content.trim();
 
   } catch (error) {
+    // Only log the actual analysis failure, which is important
     console.error("Ollama analizi başarısız:", error);
     return "Analiz yapılamadı. Ollama çalışıyor mu?";
   }
