@@ -501,6 +501,60 @@ const App: React.FC = () => {
     }
   };
 
+  const handleExport = () => {
+    // If papers are selected, export those. Otherwise, export all visible papers.
+    const targetPapers = selectedPaperIds.size > 0 
+      ? displayPapers.filter(p => selectedPaperIds.has(p.id))
+      : displayPapers;
+
+    if (targetPapers.length === 0) {
+      alert("Dışa aktarılacak makale bulunamadı.");
+      return;
+    }
+
+    let markdownContent = `# Araştırma Raporu\n\n`;
+    markdownContent += `**Tarih:** ${new Date().toLocaleDateString('tr-TR')}\n`;
+    markdownContent += `**Kaynak:** Yerel Elicit\n\n---\n\n`;
+
+    targetPapers.forEach((paper, index) => {
+      const analysis = analyses[paper.id];
+      
+      markdownContent += `## ${index + 1}. ${paper.title}\n\n`;
+      markdownContent += `**Yazarlar:** ${paper.authors.join(', ')}\n`;
+      markdownContent += `**Yıl:** ${paper.year}\n`;
+      if (paper.doi) {
+        markdownContent += `**DOI:** [${paper.doi}](https://doi.org/${paper.doi})\n`;
+      }
+      markdownContent += `**Dergi/Kaynak:** ${paper.source}\n\n`;
+      
+      markdownContent += `### Özet (Abstract)\n${paper.abstract}\n\n`;
+      
+      if (analysis) {
+         if (analysis.summary && visibleColumns.has('summary')) {
+            markdownContent += `### AI Özeti\n${analysis.summary}\n\n`;
+         }
+         if (analysis.methodology && visibleColumns.has('methodology')) {
+            markdownContent += `### Metodoloji\n${analysis.methodology}\n\n`;
+         }
+         if (analysis.outcome && visibleColumns.has('outcome')) {
+            markdownContent += `### Bulgular\n${analysis.outcome}\n\n`;
+         }
+      }
+      
+      markdownContent += `---\n\n`;
+    });
+
+    const blob = new Blob([markdownContent], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'research_report.md';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="h-screen flex flex-col bg-white text-gray-900 font-sans overflow-hidden">
       
@@ -705,7 +759,7 @@ const App: React.FC = () => {
                 )}
               </div>
               
-              <ToolbarButton icon={<Download className="w-3.5 h-3.5" />} label="Dışa Aktar" />
+              <ToolbarButton onClick={handleExport} icon={<Download className="w-3.5 h-3.5" />} label="Dışa Aktar" />
            </div>
            <div className="text-xs text-gray-500">
               {view === 'search' ? (
@@ -929,14 +983,6 @@ const App: React.FC = () => {
                            </td>
                            <td className="px-5 py-5 align-top border-r border-gray-100">
                              <div className="flex flex-col gap-1.5">
-                               {paper.isMock && (
-                                  <div className="mb-1">
-                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-700 border border-amber-200 uppercase tracking-wider">
-                                      Örnek Veri
-                                    </span>
-                                  </div>
-                               )}
-
                                <div 
                                  className="text-base font-bold text-gray-900 hover:text-purple-600 hover:underline leading-snug"
                                >
@@ -1210,8 +1256,8 @@ const App: React.FC = () => {
 };
 
 // UI Components
-const ToolbarButton = ({ icon, label }: { icon: React.ReactNode, label: string }) => (
-  <button className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-100 hover:text-gray-900 rounded-md transition-colors border border-transparent hover:border-gray-200">
+const ToolbarButton = ({ icon, label, onClick }: { icon: React.ReactNode, label: string, onClick?: () => void }) => (
+  <button onClick={onClick} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-100 hover:text-gray-900 rounded-md transition-colors border border-transparent hover:border-gray-200">
     {icon}
     {label}
   </button>

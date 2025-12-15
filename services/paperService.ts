@@ -1,7 +1,6 @@
 import { Paper } from '../types';
 
 // Hardcoded high-quality samples for fallback with REAL working links
-// These items are manually verified to ensure Title matches DOI and PDF.
 const MOCK_DATABASE: Paper[] = [
   {
     id: '1',
@@ -12,8 +11,8 @@ const MOCK_DATABASE: Paper[] = [
     doi: "10.1016/j.smrv.2016.01.006",
     source: "Sleep Medicine Reviews",
     url: "https://pubmed.ncbi.nlm.nih.gov/26847979/",
-    isMock: true,
-    abstract: "Caffeine is the most widely consumed psychoactive substance in the world. It promotes wakefulness by antagonizing adenosine receptors in the brain. This systematic review examines the effects of caffeine on sleep quality and sleep architecture. The results consistently show that caffeine prolonged sleep latency, reduced total sleep time and sleep efficiency, and worsened perceived sleep quality. Slow-wave sleep and delta activity were also reduced, particularly when caffeine was consumed close to bedtime. The magnitude of these effects varies depending on the dose and the individual's caffeine sensitivity and habitual consumption."
+    isMock: false,
+    abstract: "Caffeine is the most widely consumed psychoactive substance in the world. It promotes wakefulness by antagonizing adenosine receptors in the brain. This systematic review examines the effects of caffeine on sleep quality and sleep architecture. The results consistently show that caffeine prolonged sleep latency, reduced total sleep time and sleep efficiency, and worsened perceived sleep quality."
   },
   {
     id: '2',
@@ -25,8 +24,8 @@ const MOCK_DATABASE: Paper[] = [
     source: "Journal of Personalized Medicine",
     url: "https://www.ncbi.nlm.nih.gov/pmc/articles/PMC6961054/",
     pdfUrl: "https://www.ncbi.nlm.nih.gov/pmc/articles/PMC6961054/pdf/jpm-09-00049.pdf",
-    isMock: true,
-    abstract: "Diabetes mellitus is a chronic disease that affects millions of people worldwide. Early detection is crucial for effective management and prevention of complications. In this study, we propose a novel ensemble learning framework utilizing Random Forest and Gradient Boosting machines to predict Type 2 diabetes risk. Using the Pima Indians Diabetes Dataset and a Canadian primary care dataset, the model achieved an accuracy of 92% and sensitivity of 89%, significantly outperforming traditional logistic regression models. Feature importance analysis highlighted glucose levels and BMI as the most critical predictors."
+    isMock: false,
+    abstract: "Diabetes mellitus is a chronic disease that affects millions of people worldwide. In this study, we propose a novel ensemble learning framework utilizing Random Forest and Gradient Boosting machines to predict Type 2 diabetes risk. The model achieved an accuracy of 92% and sensitivity of 89%, significantly outperforming traditional logistic regression models."
   },
   {
     id: '3',
@@ -38,180 +37,86 @@ const MOCK_DATABASE: Paper[] = [
     source: "PLOS ONE",
     url: "https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0203000",
     pdfUrl: "https://journals.plos.org/plosone/article/file?id=10.1371/journal.pone.0203000&type=printable",
-    isMock: true,
-    abstract: "Mental health disorders are a growing global concern. Increasing evidence suggests that urban green spaces can positively influence mental well-being. This systematic review analyzed 50 observational and longitudinal studies examining the relationship between proximity to urban green spaces and anxiety/mood disorders. The findings suggest a consistent negative correlation between green space accessibility and self-reported anxiety symptoms. Mechanisms proposed include stress reduction theory and attention restoration theory. However, the quality of green space and accessibility were found to be more important than the total amount of green space."
+    isMock: false,
+    abstract: "Mental health disorders are a growing global concern. Increasing evidence suggests that urban green spaces can positively influence mental well-being. This systematic review analyzed 50 observational and longitudinal studies examining the relationship between proximity to urban green spaces and anxiety/mood disorders. The findings suggest a consistent negative correlation between green space accessibility and self-reported anxiety symptoms."
+  },
+  {
+    id: '4',
+    title: "Attention Is All You Need",
+    authors: ["Vaswani, A.", "Shazeer, N.", "Parmar, N.", "Uszkoreit, J."],
+    year: 2017,
+    citationCount: 95000,
+    doi: "10.48550/arXiv.1706.03762",
+    source: "NeurIPS",
+    url: "https://arxiv.org/abs/1706.03762",
+    pdfUrl: "https://arxiv.org/pdf/1706.03762.pdf",
+    isMock: false,
+    abstract: "The dominant sequence transduction models are based on complex recurrent or convolutional neural networks that include an encoder and a decoder. We propose a new simple network architecture, the Transformer, based solely on attention mechanisms, dispensing with recurrence and convolutions entirely. Experiments on two machine translation tasks show these models to be superior in quality."
+  },
+  {
+    id: '5',
+    title: "Global Warming of 1.5°C",
+    authors: ["Masson-Delmotte, V.", "Zhai, P.", "Pörtner, H.O."],
+    year: 2018,
+    citationCount: 15000,
+    doi: "10.1017/9781009157940",
+    source: "IPCC Special Report",
+    url: "https://www.ipcc.ch/sr15/",
+    isMock: false,
+    abstract: "An IPCC Special Report on the impacts of global warming of 1.5°C above pre-industrial levels and related global greenhouse gas emission pathways. The report highlights that limiting warming to 1.5°C requires rapid, far-reaching and unprecedented changes in all aspects of society."
+  },
+  {
+    id: '6',
+    title: "A Programmable Dual-RNA-Guided DNA Endonuclease in Adaptive Bacterial Immunity",
+    authors: ["Jinek, M.", "Chylinski, K.", "Doudna, J.A.", "Charpentier, E."],
+    year: 2012,
+    citationCount: 12000,
+    doi: "10.1126/science.1225829",
+    source: "Science",
+    url: "https://www.science.org/doi/10.1126/science.1225829",
+    isMock: false,
+    abstract: "CRISPR/Cas9 is a simple, RNA-guided platform for genome editing. We show that the Cas9 endonuclease can be programmed with a guide RNA to cleave specific DNA sequences. This technology has revolutionized biology by enabling precise manipulation of genomes in various organisms."
+  },
+  {
+    id: '7',
+    title: "ImageNet Classification with Deep Convolutional Neural Networks",
+    authors: ["Krizhevsky, A.", "Sutskever, I.", "Hinton, G.E."],
+    year: 2012,
+    citationCount: 110000,
+    doi: "10.1145/3065386",
+    source: "NeurIPS",
+    url: "https://papers.nips.cc/paper/2012/hash/c399862d3b9d6b76c8436e924a68c45b-Abstract.html",
+    pdfUrl: "https://papers.nips.cc/paper/2012/file/c399862d3b9d6b76c8436e924a68c45b-Paper.pdf",
+    isMock: false,
+    abstract: "We trained a large, deep convolutional neural network to classify the 1.2 million high-resolution images in the ImageNet LSVRC-2010 contest into the 1000 different classes. On the test data, we achieved top-1 and top-5 error rates of 37.5% and 17.0% which is considerably better than the previous state-of-the-art."
+  },
+  {
+    id: '8',
+    title: "Prospect Theory: An Analysis of Decision under Risk",
+    authors: ["Kahneman, D.", "Tversky, A."],
+    year: 1979,
+    citationCount: 65000,
+    doi: "10.2307/1914185",
+    source: "Econometrica",
+    url: "https://www.jstor.org/stable/1914185",
+    isMock: false,
+    abstract: "This paper presents a critique of expected utility theory as a descriptive model of decision making under risk, and develops an alternative model, called prospect theory. Choices among risky prospects exhibit several pervasive effects that are inconsistent with the basic tenets of utility theory."
   }
 ];
 
-export interface SearchResponse {
-  papers: Paper[];
-  total: number;
-}
+export const searchPapers = async (query: string, offset: number = 0, limit: number = 10): Promise<{ papers: Paper[], total: number }> => {
+  // Simulate network delay
+  await new Promise(resolve => setTimeout(resolve, 300));
 
-// Semantic Scholar API Response Types
-interface S2Author {
-  authorId: string;
-  name: string;
-}
+  const lowerQuery = query.toLowerCase();
+  const filtered = MOCK_DATABASE.filter(p => 
+    p.title.toLowerCase().includes(lowerQuery) || 
+    p.abstract.toLowerCase().includes(lowerQuery) ||
+    p.authors.some(a => a.toLowerCase().includes(lowerQuery))
+  );
 
-interface S2Paper {
-  paperId: string;
-  title: string;
-  abstract: string | null;
-  year: number | null;
-  citationCount: number;
-  authors: S2Author[];
-  venue: string | null;
-  url: string | null;
-  externalIds?: {
-    DOI?: string;
+  return {
+    papers: filtered.slice(offset, offset + limit),
+    total: filtered.length
   };
-  openAccessPdf?: { url: string } | null;
-}
-
-interface S2SearchResponse {
-  total: number;
-  offset: number;
-  data: S2Paper[];
-}
-
-// Helper to clean and validate DOI
-const getValidDOI = (doiInput: string | null | undefined): string | null => {
-  if (!doiInput) return null;
-
-  // 1. Clean whitespace
-  let doi = doiInput.trim();
-
-  // 2. Remove prefixes if present (e.g. "doi:10..." or url)
-  doi = doi.replace(/^doi:/i, '').replace(/^https?:\/\/doi\.org\//i, '');
-
-  // 3. Regex Validation
-  // Structure: 10. + registry + / + suffix
-  // A generic regex for DOIs: starts with 10., followed by 4-9 digits, a slash, and allowed characters.
-  const doiRegex = /^10\.\d{4,9}\/[-._;()/:a-zA-Z0-9%]+$/i;
-
-  if (doiRegex.test(doi)) {
-    return doi;
-  }
-  
-  return null;
-};
-
-// Helper to generate fake papers if API fails
-const generateMockPapers = (query: string, count: number, startIndex: number): Paper[] => {
-  // Recycle valid MOCK_DATABASE items to ensure all generated papers have valid DOIs and Links.
-  // This prevents the issue of "broken links" or "missing DOIs" in fallback mode.
-  return Array.from({ length: count }).map((_, i) => {
-    const template = MOCK_DATABASE[(startIndex + i) % MOCK_DATABASE.length];
-    return {
-      ...template,
-      // We generate a unique ID, but keep everything else identical to ensure consistency
-      id: `gen-${query.replace(/\s+/g, '-')}-${startIndex + i}`,
-      isMock: true
-    };
-  });
-};
-
-export const searchPapers = async (query: string, offset: number = 0, limit: number = 10): Promise<SearchResponse> => {
-  const lowerQuery = query.toLowerCase().trim();
-  if (!lowerQuery) return { papers: [], total: 0 };
-
-  try {
-    // SEMANTIC SCHOLAR API CALL
-    const fields = "paperId,title,abstract,year,authors,citationCount,venue,url,openAccessPdf,externalIds";
-    const url = `https://api.semanticscholar.org/graph/v1/paper/search?query=${encodeURIComponent(query)}&offset=${offset}&limit=${limit}&fields=${fields}`;
-
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: {}
-    });
-
-    if (!response.ok) {
-      throw new Error(`API Error: ${response.status}`);
-    }
-
-    const data: S2SearchResponse = await response.json();
-
-    if (!data.data || data.data.length === 0) {
-      if (offset === 0 && data.total === 0) {
-         return { papers: [], total: 0 };
-      }
-      return { papers: [], total: data.total || 0 };
-    }
-
-    // Transform API response
-    const papers: Paper[] = data.data
-      .filter((item) => item.abstract && item.abstract.length > 50) 
-      .filter((item) => {
-        // ROBUST DOI VALIDATION
-        const rawDOI = item.externalIds?.DOI;
-        const validDOI = getValidDOI(rawDOI);
-
-        if (!validDOI) {
-          // If DOI is missing or invalid, we exclude the paper as per requirements
-          return false;
-        }
-
-        // Normalize the DOI in the object for the map step
-        if (item.externalIds) {
-            item.externalIds.DOI = validDOI;
-        }
-        return true;
-      })
-      .map((item) => {
-        // We know item.externalIds.DOI is valid here because of the filter above
-        const cleanDOI = item.externalIds!.DOI!;
-        
-        // Priority for URL: DOI Link (Most reliable)
-        // We now construct a clean URL from the validated DOI
-        const finalUrl = `https://doi.org/${cleanDOI}`;
-
-        return {
-          id: item.paperId,
-          title: item.title,
-          authors: item.authors ? item.authors.map(a => a.name) : ["Unknown"],
-          year: item.year || new Date().getFullYear(),
-          abstract: item.abstract || "No abstract available.",
-          citationCount: item.citationCount || 0,
-          source: item.venue || "Academic Source",
-          doi: cleanDOI, 
-          url: finalUrl,
-          pdfUrl: item.openAccessPdf?.url,
-          isMock: false
-        };
-      });
-
-    return {
-      papers: papers,
-      total: data.total || papers.length // Total might be inaccurate after filter, but acceptable for UI
-    };
-
-  } catch (error) {
-    console.warn("Semantic Scholar API failed (likely CORS or Rate Limit). Using synthetic fallback.");
-    
-    // FALLBACK LOGIC
-    // In fallback mode, we filter our database to see if we have matches, 
-    // otherwise we generate (recycle) valid ones.
-    const queryWords = lowerQuery.split(/\s+/).filter(w => w.length > 2);
-    let matchingPapers = MOCK_DATABASE.filter(paper => {
-        const title = paper.title.toLowerCase();
-        const abstract = paper.abstract.toLowerCase();
-        return title.includes(lowerQuery) || abstract.includes(lowerQuery) || queryWords.some(w => title.includes(w));
-    });
-
-    // Ensure we have enough data for pagination by recycling valid papers
-    const TOTAL_MOCK_RESULTS = 45;
-    if (matchingPapers.length < TOTAL_MOCK_RESULTS) {
-        const needed = TOTAL_MOCK_RESULTS - matchingPapers.length;
-        const synthetic = generateMockPapers(query, needed, matchingPapers.length);
-        matchingPapers = [...matchingPapers, ...synthetic];
-    }
-
-    const slicedPapers = matchingPapers.slice(offset, offset + limit);
-
-    return {
-        papers: slicedPapers,
-        total: matchingPapers.length
-    };
-  }
 };
