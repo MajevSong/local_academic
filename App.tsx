@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, Database, AlertCircle, Loader2, Sparkles, Filter, ArrowUpDown, Download, Layout, ChevronRight, Send, CheckSquare, Square, MessageSquare, Plus, ExternalLink, XCircle, FileText, Check, Library, Bookmark, BookOpen, Calendar, Hash, FileCheck, X, User, Bot, Trash2, PenTool, BookText, Wand2, Copy, Code } from 'lucide-react';
+import { Search, Database, AlertCircle, Loader2, Sparkles, Filter, ArrowUpDown, Download, Layout, ChevronRight, Send, CheckSquare, Square, MessageSquare, Plus, ExternalLink, XCircle, FileText, Check, Library, Bookmark, BookOpen, Calendar, Hash, FileCheck, X, User, Bot, Trash2, PenTool, BookText, Wand2, Copy, Code, WifiOff } from 'lucide-react';
 import { Paper, AnalysisResult, FilterState, ChatMessage } from './types';
 import { searchPapers } from './services/paperService';
 import { analyzePaperWithOllama, checkOllamaConnection, synthesizeFindings, chatWithPapers, generateLiteratureReview, generateTopicFromPapers } from './services/ollamaService';
@@ -68,6 +68,7 @@ const App: React.FC = () => {
   // Pagination State
   const [totalResults, setTotalResults] = useState(0);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
   
   const [selectedPaper, setSelectedPaper] = useState<Paper | null>(null);
   
@@ -223,6 +224,7 @@ const App: React.FC = () => {
     setPapers([]);
     setTotalResults(0);
     setHasSearched(false);
+    setSearchError(null);
     setAnalyses({});
     setSynthesis("");
     setChatHistory([]);
@@ -237,6 +239,7 @@ const App: React.FC = () => {
     setView('search');
     setIsSearching(true);
     setHasSearched(true);
+    setSearchError(null);
     setPapers([]);
     setTotalResults(0);
     setSelectedPaper(null);
@@ -249,6 +252,11 @@ const App: React.FC = () => {
       setPapers(response.papers);
       setTotalResults(response.total);
 
+      if (response.papers.length === 0 && response.total === 0) {
+         // It might be just no results, or error handled in service. 
+         // If service returns empty but no error thrown, it's just no results.
+      }
+
       if (response.papers.length > 0) {
         // Trigger row analysis
         triggerBatchAnalysis(response.papers);
@@ -257,6 +265,7 @@ const App: React.FC = () => {
       }
     } catch (error) {
       console.error("Search failed", error);
+      setSearchError("Arama sırasında bir hata oluştu. Lütfen bağlantınızı kontrol edin.");
     } finally {
       setIsSearching(false);
     }
@@ -380,6 +389,21 @@ const App: React.FC = () => {
         return [...prev, paper];
       }
     });
+  };
+
+  // Batch Save Functionality
+  const handleBatchSave = () => {
+    const papersToSave = displayPapers.filter(p => selectedPaperIds.has(p.id));
+    if (papersToSave.length === 0) return;
+
+    setSavedPapers(prev => {
+      const existingIds = new Set(prev.map(p => p.id));
+      const newPapers = papersToSave.filter(p => !existingIds.has(p.id));
+      return [...prev, ...newPapers];
+    });
+    
+    // Clear selection after saving for better UX
+    setSelectedPaperIds(new Set());
   };
 
   const isSaved = (id: string) => savedPapers.some(p => p.id === id);
@@ -784,6 +808,17 @@ const App: React.FC = () => {
                   </div>
                 )}
               </div>
+
+              {/* Bulk Save Button */}
+              {selectedPaperIds.size > 0 && (
+                <button 
+                    onClick={handleBatchSave}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-purple-700 bg-purple-50 hover:bg-purple-100 border border-purple-200 rounded-md transition-colors"
+                >
+                    <Bookmark className="w-3.5 h-3.5" />
+                    Seçilenleri Kaydet ({selectedPaperIds.size})
+                </button>
+              )}
               
               <ToolbarButton onClick={handleExport} icon={<Code className="w-3.5 h-3.5" />} label="LaTeX İndir" />
            </div>
@@ -927,7 +962,7 @@ const App: React.FC = () => {
             <div className="flex-1 flex flex-col min-w-0 bg-gray-50/50">
            
            {/* Empty State - Initial Search */}
-           {view === 'search' && !hasSearched && !isSearching && papers.length === 0 && (
+           {view === 'search' && !hasSearched && !isSearching && !searchError && papers.length === 0 && (
               <div className="flex-1 flex flex-col items-center justify-center text-gray-400 p-8">
                   <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4">
                      <Search className="w-8 h-8 text-gray-300" />
@@ -941,6 +976,23 @@ const App: React.FC = () => {
                   </div>
               </div>
            )}
+           
+           {/* ERROR STATE */}
+           {searchError && (
+              <div className="flex-1 flex flex-col items-center justify-center text-red-500 p-8">
+                 <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mb-4">
+                    <WifiOff className="w-8 h-8 text-red-400" />
+                 </div>
+                 <h3 className="text-lg font-medium text-gray-800">Bağlantı Hatası</h3>
+                 <p className="text-sm mt-2 max-w-md text-center text-gray-600">{searchError}</p>
+                 <button 
+                    onClick={() => handleSearch()}
+                    className="mt-4 px-4 py-2 bg-red-600 text-white rounded-md text-sm font-medium hover:bg-red-700 transition-colors"
+                 >
+                    Tekrar Dene
+                 </button>
+              </div>
+           )}
 
             {/* Empty State - Library */}
            {view === 'library' && savedPapers.length === 0 && (
@@ -951,6 +1003,23 @@ const App: React.FC = () => {
                <h3 className="text-lg font-medium text-gray-600">Kitaplığınız Boş</h3>
                <p className="text-sm mt-2 max-w-md text-center">Arama sonuçlarından ilgilendiğiniz makaleleri kaydederek burada görüntüleyebilirsiniz.</p>
              </div>
+           )}
+
+           {/* Empty State - No Search Results Found (Database empty for query) */}
+           {view === 'search' && hasSearched && !isSearching && !searchError && sourcePapers.length === 0 && (
+              <div className="flex-1 flex flex-col items-center justify-center text-gray-400 p-8">
+                  <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4">
+                     <Search className="w-8 h-8 text-gray-300" />
+                  </div>
+                  <h3 className="text-lg font-medium text-gray-600">Sonuç Bulunamadı</h3>
+                  <p className="text-sm mt-2 max-w-md text-center">"{query}" araması için herhangi bir makale bulunamadı. Lütfen farklı anahtar kelimeler deneyin.</p>
+                   <button 
+                      onClick={clearSearch}
+                      className="mt-4 px-4 py-2 bg-white border border-gray-300 rounded text-sm font-medium hover:bg-gray-50 text-gray-700"
+                   >
+                      Aramayı Temizle
+                   </button>
+              </div>
            )}
            
            {/* Empty State - Filter Result Empty */}
@@ -1167,7 +1236,7 @@ const App: React.FC = () => {
                </table>
                
                {/* Load More Trigger - Only in Search View */}
-               {view === 'search' && papers.length < totalResults && !isSearching && (
+               {view === 'search' && papers.length < totalResults && !isSearching && !searchError && (
                  <div className="p-4 flex justify-center border-t border-gray-200 bg-white">
                     <button 
                       onClick={handleLoadMore}
