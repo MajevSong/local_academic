@@ -6,6 +6,7 @@ export interface Paper {
   abstract: string;
   citationCount: number;
   url?: string;
+  doi?: string;
   source: string;
   savedAnalysis?: {
     summary: string;

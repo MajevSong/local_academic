@@ -8,7 +8,9 @@ const MOCK_DATABASE: Paper[] = [
     authors: ["J. Smith", "A. Doe"],
     year: 2023,
     citationCount: 45,
+    doi: "10.1111/jsr.12345",
     source: "Journal of Sleep Research",
+    url: "https://onlinelibrary.wiley.com/doi/full/10.1111/jsr.12345",
     abstract: "This study investigates the impact of high-dose caffeine consumption (400mg) administered 6 hours prior to bedtime. Using polysomnography, we found a significant reduction in sleep efficiency and slow-wave sleep duration in the experimental group compared to placebo."
   },
   {
@@ -17,7 +19,9 @@ const MOCK_DATABASE: Paper[] = [
     authors: ["K. Johnson", "B. Lee", "T. Nguyen"],
     year: 2024,
     citationCount: 12,
+    doi: "10.1016/j.artmed.2023.102751",
     source: "AI in Medicine",
+    url: "https://www.sciencedirect.com/science/article/pii/S093336572300156X",
     abstract: "We propose a novel ensemble learning framework utilizing Random Forest and Gradient Boosting machines to predict Type 2 diabetes risk. The model achieved an accuracy of 92% and sensitivity of 89% on the Pima Indians Diabetes Dataset, outperforming traditional logistic regression models."
   },
   {
@@ -51,6 +55,9 @@ interface S2Paper {
   authors: S2Author[];
   venue: string | null;
   url: string | null;
+  externalIds?: {
+    DOI?: string;
+  };
   openAccessPdf?: { url: string } | null;
 }
 
@@ -90,6 +97,7 @@ const generateMockPapers = (query: string, count: number, startIndex: number): P
       year: 2020 + (idx % 5),
       citationCount: Math.floor(Math.random() * 500),
       source: sources[idx % sources.length],
+      doi: `10.1000/xyz.${idx}`,
       abstract: `[MOCK DATA - API FAILED] This is a generated abstract for a paper about ${query}. It simulates a detailed academic summary discussing the methodology, results, and implications of the study regarding ${query}. The study observed a significant correlation (p < 0.05) in the variable set.`
     };
   });
@@ -101,7 +109,8 @@ export const searchPapers = async (query: string, offset: number = 0, limit: num
 
   try {
     // SEMANTIC SCHOLAR API CALL
-    const fields = "paperId,title,abstract,year,authors,citationCount,venue,url,openAccessPdf";
+    // Added 'externalIds' to fetch DOI
+    const fields = "paperId,title,abstract,year,authors,citationCount,venue,url,openAccessPdf,externalIds";
     const url = `https://api.semanticscholar.org/graph/v1/paper/search?query=${encodeURIComponent(query)}&offset=${offset}&limit=${limit}&fields=${fields}`;
 
     const response = await fetch(url, {
@@ -116,9 +125,7 @@ export const searchPapers = async (query: string, offset: number = 0, limit: num
     const data: S2SearchResponse = await response.json();
 
     if (!data.data || data.data.length === 0) {
-      // If API returns empty, try fallback logic for zero results or just return empty
       if (offset === 0 && data.total === 0) {
-         // Optionally could fall back to mock if strictly no results found, but let's trust the API if it returned 200 OK.
          return { papers: [], total: 0 };
       }
       return { papers: [], total: data.total || 0 };
@@ -135,6 +142,7 @@ export const searchPapers = async (query: string, offset: number = 0, limit: num
         abstract: item.abstract || "No abstract available.",
         citationCount: item.citationCount || 0,
         source: item.venue || "Academic Source",
+        doi: item.externalIds?.DOI,
         url: item.openAccessPdf?.url || item.url || `https://www.semanticscholar.org/paper/${item.paperId}`
       }));
 
@@ -147,7 +155,6 @@ export const searchPapers = async (query: string, offset: number = 0, limit: num
     console.warn("Semantic Scholar API failed (likely CORS or Rate Limit). Using synthetic fallback.");
     
     // FALLBACK LOGIC
-    // 1. Find matches in static mock DB
     const queryWords = lowerQuery.split(/\s+/).filter(w => w.length > 2);
     let matchingPapers = MOCK_DATABASE.filter(paper => {
         const title = paper.title.toLowerCase();
@@ -155,15 +162,13 @@ export const searchPapers = async (query: string, offset: number = 0, limit: num
         return title.includes(lowerQuery) || abstract.includes(lowerQuery) || queryWords.some(w => title.includes(w));
     });
 
-    // 2. Generate more to fake a large database
-    const TOTAL_MOCK_RESULTS = 45; // Enough for a few "Load More" clicks
+    const TOTAL_MOCK_RESULTS = 45;
     if (matchingPapers.length < TOTAL_MOCK_RESULTS) {
         const needed = TOTAL_MOCK_RESULTS - matchingPapers.length;
         const synthetic = generateMockPapers(query, needed, matchingPapers.length);
         matchingPapers = [...matchingPapers, ...synthetic];
     }
 
-    // 3. Paginate the fallback data
     const slicedPapers = matchingPapers.slice(offset, offset + limit);
 
     return {

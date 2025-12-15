@@ -9,7 +9,7 @@ export const checkOllamaConnection = async (): Promise<boolean> => {
   try {
     // We try to fetch tags to see if the server is responsive
     const response = await fetch(`${OLLAMA_HOST}/api/tags`, {
-      mode: 'cors',
+        mode: 'cors',
     });
     return response.ok;
   } catch (error) {
@@ -20,25 +20,25 @@ export const checkOllamaConnection = async (): Promise<boolean> => {
 };
 
 export const analyzePaperWithOllama = async (
-  abstract: string,
+  abstract: string, 
   promptType: 'summary' | 'methodology' | 'outcome'
 ): Promise<string> => {
-
+  
   let systemPrompt = "";
   let userPrompt = "";
 
   switch (promptType) {
     case 'summary':
-      systemPrompt = "Sen kıdemli bir araştırmacısın. Verilen akademik özeti Türkçe olarak, tek bir cümleyle özetle. ASLA Çince veya başka bir dil kullanma. Sadece Türkçe.";
-      userPrompt = `Özet: "${abstract}"\n\nBu makalenin ana fikri nedir? Lütfen sadece Türkçe cevap ver.`;
+      systemPrompt = "Sen kıdemli bir araştırmacısın. Verilen akademik özeti tek bir cümleyle, çok özlü bir şekilde özetle. Türkçe cevap ver.";
+      userPrompt = `Özet: "${abstract}"\n\nBu makalenin ana fikri nedir? (Tek cümle)`;
       break;
     case 'methodology':
-      systemPrompt = "Sen kıdemli bir araştırmacısın. Bu çalışmada kullanılan metodolojiyi (katılımcı sayısı, yöntem vb.) Türkçe olarak kısaca çıkar. ASLA Çince kullanma. Sadece Türkçe.";
-      userPrompt = `Özet: "${abstract}"\n\nMetodoloji nedir? Kısa, net ve sadece Türkçe olarak açıkla.`;
+      systemPrompt = "Sen kıdemli bir araştırmacısın. Bu çalışmada kullanılan metodolojiyi (katılımcı sayısı, yöntem, süre vb.) kısaca çıkar. Türkçe cevap ver.";
+      userPrompt = `Özet: "${abstract}"\n\nMetodoloji nedir? Kısa ve net ol.`;
       break;
     case 'outcome':
-      systemPrompt = "Sen kıdemli bir araştırmacısın. Bu çalışmanın ana sonucunu Türkçe olarak çıkar. ASLA Çince kullanma. Sadece Türkçe cevap ver.";
-      userPrompt = `Özet: "${abstract}"\n\nBu çalışmanın sonucu nedir? Lütfen sadece Türkçe cevap ver.`;
+      systemPrompt = "Sen kıdemli bir araştırmacısın. Bu çalışmanın ana sonucunu veya bulgusunu çıkar. İstatistiksel veri varsa dahil et. Türkçe cevap ver.";
+      userPrompt = `Özet: "${abstract}"\n\nBu çalışmanın sonucu nedir?`;
       break;
   }
 
