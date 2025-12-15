@@ -7,7 +7,10 @@ export interface Paper {
   citationCount: number;
   url?: string;
   doi?: string;
+  pdfUrl?: string;
   source: string;
+  isMock?: boolean;
+  fullText?: string; // Content extracted from PDF
   savedAnalysis?: {
     summary: string;
     methodology: string;
@@ -37,6 +40,13 @@ export interface OllamaResponse {
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
+}
+
+export interface FilterState {
+  minYear: number | '';
+  maxYear: number | '';
+  minCitations: number | '';
+  hasPdf: boolean;
 }
 
 export type AnalysisColumn = 'summary' | 'methodology' | 'outcome';

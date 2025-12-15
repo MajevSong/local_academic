@@ -1,5 +1,5 @@
 import React from 'react';
-import { X, Calendar, Users, BookOpen, Quote, Sparkles, Play, Loader2, AlertCircle, ExternalLink } from 'lucide-react';
+import { X, Calendar, Users, BookOpen, Quote, Sparkles, Play, Loader2, AlertCircle, ExternalLink, FileText, Bookmark, Trash2, FileCheck, Download } from 'lucide-react';
 import { Paper, AnalysisResult } from '../types';
 
 interface PaperDetailModalProps {
@@ -9,6 +9,13 @@ interface PaperDetailModalProps {
   onClose: () => void;
   onAnalyze: (paper: Paper) => void;
   ollamaConnected: boolean;
+  isSaved?: boolean;
+  onToggleSave?: () => void;
+  isCached?: boolean;
+  isDownloading?: boolean;
+  onDownloadPdf?: () => void;
+  onDeletePdf?: () => void;
+  onOpenPdf?: () => void;
 }
 
 const PaperDetailModal: React.FC<PaperDetailModalProps> = ({ 
@@ -17,7 +24,14 @@ const PaperDetailModal: React.FC<PaperDetailModalProps> = ({
   isOpen, 
   onClose,
   onAnalyze,
-  ollamaConnected
+  ollamaConnected,
+  isSaved,
+  onToggleSave,
+  isCached,
+  isDownloading,
+  onDownloadPdf,
+  onDeletePdf,
+  onOpenPdf
 }) => {
   if (!isOpen) return null;
 
@@ -60,19 +74,74 @@ const PaperDetailModal: React.FC<PaperDetailModalProps> = ({
               </div>
             </div>
             
-            {paper.url && (
-              <div className="pt-2">
+            <div className="flex items-center gap-3 pt-2">
+              {paper.pdfUrl && (
+                  // Logic: If isCached -> Show Open Local & Delete. Else if isSaved -> Show Download. Else -> Show External Link
+                  isCached && onOpenPdf ? (
+                     <div className="flex items-center gap-2">
+                        <button 
+                          onClick={onOpenPdf} 
+                          className="inline-flex items-center gap-2 px-3 py-1.5 bg-green-600 text-white rounded-md text-sm font-medium hover:bg-green-700 transition-colors shadow-sm"
+                        >
+                           <FileCheck className="w-4 h-4" />
+                           Yerel PDF'i Aç
+                        </button>
+                        {onDeletePdf && (
+                            <button
+                                onClick={onDeletePdf}
+                                className="p-1.5 bg-gray-100 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors"
+                                title="Önbellekten Sil"
+                            >
+                                <Trash2 className="w-4 h-4" />
+                            </button>
+                        )}
+                     </div>
+                  ) : (
+                    (isSaved && onDownloadPdf) ? (
+                        <button 
+                            onClick={onDownloadPdf}
+                            disabled={isDownloading}
+                            className="inline-flex items-center gap-2 px-3 py-1.5 bg-purple-600 text-white rounded-md text-sm font-medium hover:bg-purple-700 transition-colors shadow-sm disabled:opacity-70 disabled:cursor-wait"
+                        >
+                            {isDownloading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                            {isDownloading ? 'İndiriliyor...' : 'Önbelleğe İndir'}
+                        </button>
+                    ) : (
+                        <a 
+                            href={paper.pdfUrl} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-2 px-3 py-1.5 bg-red-600 text-white rounded-md text-sm font-medium hover:bg-red-700 transition-colors shadow-sm"
+                        >
+                            <FileText className="w-4 h-4" />
+                            PDF Bağlantısı
+                        </a>
+                    )
+                  )
+              )}
+              
+              {paper.url && (
                 <a 
                   href={paper.url} 
                   target="_blank" 
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-2 text-sm font-medium text-purple-600 hover:text-purple-800 hover:underline decoration-1 underline-offset-4"
+                  className="inline-flex items-center gap-2 px-3 py-1.5 bg-gray-100 text-gray-700 rounded-md text-sm font-medium hover:bg-gray-200 transition-colors"
                 >
                   <ExternalLink className="w-4 h-4" />
-                  Orijinal Kaynağı Oku
+                  Kaynağa Git
                 </a>
-              </div>
-            )}
+              )}
+
+              {onToggleSave && (
+                <button 
+                  onClick={onToggleSave}
+                  className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-colors border ${isSaved ? 'bg-purple-50 text-purple-700 border-purple-200' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}
+                >
+                  <Bookmark className={`w-4 h-4 ${isSaved ? 'fill-current' : ''}`} />
+                  {isSaved ? 'Kaydedildi' : 'Kaydet'}
+                </button>
+              )}
+            </div>
           </div>
           <button 
             onClick={onClose}
