@@ -1,0 +1,5 @@
+{
+  "name": "Yerel Elicit (Ollama)",
+  "description": "Ollama ve qwen2.5:14b kullanan, Elicit benzeri yerel literatür tarama ve analiz asistanı.",
+  "requestFramePermissions": []
+}
