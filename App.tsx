@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, Database, AlertCircle, Loader2, Sparkles, Filter, ArrowUpDown, Download, Layout, ChevronRight, Send, CheckSquare, Square, MessageSquare, Plus, ExternalLink, XCircle, FileText, Check, Library, Bookmark, BookOpen, Calendar, Hash, FileCheck, X, User, Bot, Trash2, PenTool, BookText, Wand2, Copy, Code, WifiOff } from 'lucide-react';
+import { Search, Database, AlertCircle, Loader2, Sparkles, Filter, ArrowUpDown, Download, Layout, ChevronRight, Send, CheckSquare, Square, MessageSquare, Plus, ExternalLink, XCircle, FileText, Check, Library, Bookmark, BookOpen, Calendar, Hash, FileCheck, X, User, Bot, Trash2, PenTool, BookText, Wand2, Copy, Code, WifiOff, Upload, Play, Settings, Cpu } from 'lucide-react';
 import { Paper, AnalysisResult, FilterState, ChatMessage } from './types';
 import { searchPapers } from './services/paperService';
-import { analyzePaperWithOllama, checkOllamaConnection, synthesizeFindings, chatWithPapers, generateLiteratureReview, generateTopicFromPapers } from './services/ollamaService';
+import { analyzePaperWithOllama, checkAIConnection, synthesizeFindings, chatWithPapers, generateLiteratureReview, generateTopicFromPapers, extractPaperMetadata, setPreferredProvider, ProviderPreference } from './services/ollamaService';
 import { savePdfToCache, getPdfFromCache, deletePdfFromCache, getCachedPdfIds, extractTextFromPdf } from './services/storageService';
 import PaperDetailModal from './components/PaperDetailModal';
 
@@ -24,7 +24,7 @@ const App: React.FC = () => {
   // State
   const [query, setQuery] = useState('');
   const [view, setView] = useState<'search' | 'library' | 'write'>('search');
-  
+
   // Data State
   const [papers, setPapers] = useState<Paper[]>([]);
   const [savedPapers, setSavedPapers] = useState<Paper[]>(() => {
@@ -34,10 +34,18 @@ const App: React.FC = () => {
     }
     return [];
   });
-  
+
   // PDF Cache State
   const [cachedPdfIds, setCachedPdfIds] = useState<Set<string>>(new Set());
   const [isDownloadingPdf, setIsDownloadingPdf] = useState<Record<string, boolean>>({});
+
+  // AI Provider State
+  const [selectedProvider, setSelectedProvider] = useState<ProviderPreference>('auto');
+
+  // Sync Provider Preference
+  useEffect(() => {
+    setPreferredProvider(selectedProvider);
+  }, [selectedProvider]);
 
   // Filter State
   const [filters, setFilters] = useState<FilterState>({
@@ -53,7 +61,7 @@ const App: React.FC = () => {
   const [analyses, setAnalyses] = useState<Record<string, AnalysisResult>>({});
   const [synthesis, setSynthesis] = useState<string>("");
   const [isSynthesizing, setIsSynthesizing] = useState(false);
-  
+
   const [chatInput, setChatInput] = useState('');
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
   const [isChatLoading, setIsChatLoading] = useState(false);
@@ -69,38 +77,49 @@ const App: React.FC = () => {
   const [totalResults, setTotalResults] = useState(0);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
-  
+
   const [selectedPaper, setSelectedPaper] = useState<Paper | null>(null);
-  
+
   // Selection State
   const [selectedPaperIds, setSelectedPaperIds] = useState<Set<string>>(new Set());
 
   // UI State
   const [isSearching, setIsSearching] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
-  const [ollamaStatus, setOllamaStatus] = useState<boolean | null>(null);
+  const [aiStatus, setAiStatus] = useState({ ollama: false, gemini: false });
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  
+
   // Column State
   const [visibleColumns, setVisibleColumns] = useState<Set<ColumnKey>>(new Set(['summary']));
   const [showColumnMenu, setShowColumnMenu] = useState(false);
   const columnMenuRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Initial check for Ollama and Cache
   useEffect(() => {
     checkConnection();
     const interval = setInterval(checkConnection, 10000);
-    
+
     // Load cached PDFs
     getCachedPdfIds().then(ids => {
-        setCachedPdfIds(new Set(ids));
+      setCachedPdfIds(new Set(ids));
     }).catch(err => console.error("Cache load error:", err));
 
     return () => clearInterval(interval);
   }, []);
 
   useEffect(() => {
-    localStorage.setItem('savedPapers', JSON.stringify(savedPapers));
+    try {
+      // Remove fullText before saving to avoid quota limits (5MB)
+      const papersToSave = savedPapers.map(p => {
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const { fullText, ...rest } = p;
+        return rest;
+      });
+      localStorage.setItem('savedPapers', JSON.stringify(papersToSave));
+    } catch (error) {
+      console.error("LocalStorage save failed:", error);
+    }
   }, [savedPapers]);
 
   // Scroll to bottom of chat when history changes
@@ -125,8 +144,8 @@ const App: React.FC = () => {
   }, []);
 
   const checkConnection = async () => {
-    const isConnected = await checkOllamaConnection();
-    setOllamaStatus(isConnected);
+    const status = await checkAIConnection();
+    setAiStatus(status);
   };
 
   // Helper: Enrich papers with PDF content if available in cache
@@ -152,71 +171,71 @@ const App: React.FC = () => {
 
   // PDF Handling Functions
   const handleDownloadPdf = async (paper: Paper) => {
-      if (!paper.pdfUrl) return;
-      
-      setIsDownloadingPdf(prev => ({ ...prev, [paper.id]: true }));
-      try {
-          let blob: Blob;
+    if (!paper.pdfUrl) return;
 
-          try {
-             // Attempt 1: Direct Fetch
-             const response = await fetch(paper.pdfUrl);
-             if (!response.ok) throw new Error('Direct fetch failed');
-             blob = await response.blob();
-          } catch (directError) {
-             console.warn("Direct download failed (CORS?), trying proxy...", directError);
-             // Attempt 2: CORS Proxy (corsproxy.io)
-             // Using a standard CORS proxy to bypass browser restrictions for the demo
-             const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(paper.pdfUrl)}`;
-             const proxyResponse = await fetch(proxyUrl);
-             if (!proxyResponse.ok) throw new Error('Proxy fetch failed');
-             blob = await proxyResponse.blob();
-          }
-          
-          await savePdfToCache(paper.id, blob);
-          setCachedPdfIds(prev => {
-              const newSet = new Set(prev);
-              newSet.add(paper.id);
-              return newSet;
-          });
-      } catch (error) {
-          console.error("PDF Download failed:", error);
-          alert("PDF indirilemedi. Sunucu indirmeye izin vermiyor (CORS). Lütfen 'PDF Bağlantısı' butonu ile yeni sekmede açın.");
-      } finally {
-          setIsDownloadingPdf(prev => ({ ...prev, [paper.id]: false }));
+    setIsDownloadingPdf(prev => ({ ...prev, [paper.id]: true }));
+    try {
+      let blob: Blob;
+
+      try {
+        // Attempt 1: Direct Fetch
+        const response = await fetch(paper.pdfUrl);
+        if (!response.ok) throw new Error('Direct fetch failed');
+        blob = await response.blob();
+      } catch (directError) {
+        console.warn("Direct download failed (CORS?), trying proxy...", directError);
+        // Attempt 2: CORS Proxy (corsproxy.io)
+        // Using a standard CORS proxy to bypass browser restrictions for the demo
+        const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(paper.pdfUrl)}`;
+        const proxyResponse = await fetch(proxyUrl);
+        if (!proxyResponse.ok) throw new Error('Proxy fetch failed');
+        blob = await proxyResponse.blob();
       }
+
+      await savePdfToCache(paper.id, blob);
+      setCachedPdfIds(prev => {
+        const newSet = new Set(prev);
+        newSet.add(paper.id);
+        return newSet;
+      });
+    } catch (error) {
+      console.error("PDF Download failed:", error);
+      alert("PDF indirilemedi. Sunucu indirmeye izin vermiyor (CORS). Lütfen 'PDF Bağlantısı' butonu ile yeni sekmede açın.");
+    } finally {
+      setIsDownloadingPdf(prev => ({ ...prev, [paper.id]: false }));
+    }
   };
 
-  const handleDeletePdf = async (paperId: string) => {
-      if (!confirm("Bu PDF'i yerel hafızadan silmek istediğinize emin misiniz?")) return;
-      try {
-          await deletePdfFromCache(paperId);
-          setCachedPdfIds(prev => {
-              const newSet = new Set(prev);
-              newSet.delete(paperId);
-              return newSet;
-          });
-          // Remove fullText from memory if exists
-          setSavedPapers(prev => prev.map(p => p.id === paperId ? { ...p, fullText: undefined } : p));
-      } catch (error) {
-          console.error("Delete failed:", error);
-          alert("Silme işlemi başarısız oldu.");
-      }
+  const handleDeletePdf = async (paperId: string, skipConfirm = false) => {
+    if (!skipConfirm && !confirm("Bu PDF'i yerel hafızadan silmek istediğinize emin misiniz?")) return;
+    try {
+      await deletePdfFromCache(paperId);
+      setCachedPdfIds(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(paperId);
+        return newSet;
+      });
+      // Remove fullText from memory if exists
+      setSavedPapers(prev => prev.map(p => p.id === paperId ? { ...p, fullText: undefined } : p));
+    } catch (error) {
+      console.error("Delete failed:", error);
+      alert("Silme işlemi başarısız oldu.");
+    }
   };
 
   const handleOpenLocalPdf = async (paperId: string) => {
-      try {
-          const blob = await getPdfFromCache(paperId);
-          if (blob) {
-              const url = URL.createObjectURL(blob);
-              window.open(url, '_blank');
-          } else {
-              alert("Dosya bulunamadı.");
-          }
-      } catch (error) {
-          console.error("Open failed:", error);
-          alert("Dosya açılamadı.");
+    try {
+      const blob = await getPdfFromCache(paperId);
+      if (blob) {
+        const url = URL.createObjectURL(blob);
+        window.open(url, '_blank');
+      } else {
+        alert("Dosya bulunamadı.");
       }
+    } catch (error) {
+      console.error("Open failed:", error);
+      alert("Dosya açılamadı.");
+    }
   };
 
   const clearSearch = () => {
@@ -253,8 +272,8 @@ const App: React.FC = () => {
       setTotalResults(response.total);
 
       if (response.papers.length === 0 && response.total === 0) {
-         // It might be just no results, or error handled in service. 
-         // If service returns empty but no error thrown, it's just no results.
+        // It might be just no results, or error handled in service. 
+        // If service returns empty but no error thrown, it's just no results.
       }
 
       if (response.papers.length > 0) {
@@ -279,14 +298,14 @@ const App: React.FC = () => {
       const nextOffset = papers.length;
       const response = await searchPapers(query, nextOffset, 10);
       const newPapers = response.papers;
-      
+
       // DEDUPLICATION LOGIC
       setPapers(prev => {
         const existingIds = new Set(prev.map(p => p.id));
         const uniqueNewPapers = newPapers.filter(p => !existingIds.has(p.id));
         return [...prev, ...uniqueNewPapers];
       });
-      
+
       if (newPapers.length > 0) {
         triggerBatchAnalysis(newPapers);
       }
@@ -303,7 +322,7 @@ const App: React.FC = () => {
 
     const currentMessage = chatInput.trim();
     setChatInput('');
-    
+
     // Add user message
     const userMsg: ChatMessage = { role: 'user', content: currentMessage };
     setChatHistory(prev => [...prev, userMsg]);
@@ -312,20 +331,20 @@ const App: React.FC = () => {
     try {
       // Determine context papers (search results or saved library depending on view)
       let contextPapers = view === 'search' ? papers : savedPapers;
-      
+
       if (contextPapers.length === 0) {
-         setChatHistory(prev => [...prev, { role: 'assistant', content: "Sohbet edebilmek için önce arama yapmalı veya kitaplığınıza makale eklemelisiniz." }]);
-         setIsChatLoading(false);
-         return;
+        setChatHistory(prev => [...prev, { role: 'assistant', content: "Sohbet edebilmek için önce arama yapmalı veya kitaplığınıza makale eklemelisiniz." }]);
+        setIsChatLoading(false);
+        return;
       }
-      
+
       // ENRICH WITH PDF CONTENT IF AVAILABLE
       // We only enrich the top 5 papers to be used in context to save performance
       const papersToEnrich = contextPapers.slice(0, 5);
       const enrichedPapers = await enrichPapersWithPdfContent(papersToEnrich);
 
       const response = await chatWithPapers(currentMessage, enrichedPapers, [...chatHistory, userMsg]);
-      
+
       setChatHistory(prev => [...prev, { role: 'assistant', content: response }]);
     } catch (error) {
       console.error("Chat error:", error);
@@ -336,37 +355,37 @@ const App: React.FC = () => {
   };
 
   const handleWritePaper = async () => {
-     if (!writeTopic.trim() || savedPapers.length === 0) return;
-     
-     setIsWriting(true);
-     setGeneratedPaper(""); // Clear previous
-     try {
-         // Enrich cached papers with full text content
-         const enrichedSavedPapers = await enrichPapersWithPdfContent(savedPapers);
-         
-         // Update state with enriched papers so we don't re-parse next time
-         setSavedPapers(enrichedSavedPapers);
+    if (!writeTopic.trim() || savedPapers.length === 0) return;
 
-         const result = await generateLiteratureReview(writeTopic, enrichedSavedPapers);
-         setGeneratedPaper(result);
-     } catch (error) {
-         setGeneratedPaper("Bir hata oluştu. Lütfen tekrar deneyin.");
-         console.error(error);
-     } finally {
-         setIsWriting(false);
-     }
+    setIsWriting(true);
+    setGeneratedPaper(""); // Clear previous
+    try {
+      // Enrich cached papers with full text content
+      const enrichedSavedPapers = await enrichPapersWithPdfContent(savedPapers);
+
+      // Update state with enriched papers so we don't re-parse next time
+      setSavedPapers(enrichedSavedPapers);
+
+      const result = await generateLiteratureReview(writeTopic, enrichedSavedPapers);
+      setGeneratedPaper(result);
+    } catch (error) {
+      setGeneratedPaper("Bir hata oluştu. Lütfen tekrar deneyin.");
+      console.error(error);
+    } finally {
+      setIsWriting(false);
+    }
   };
 
   const handleGenerateTopic = async () => {
-    if (savedPapers.length === 0 || !ollamaStatus) return;
+    if (savedPapers.length === 0 || !(aiStatus.ollama || aiStatus.gemini)) return;
     setIsGeneratingTopic(true);
     try {
-        const title = await generateTopicFromPapers(savedPapers);
-        setWriteTopic(title.replace(/^["']|["']$/g, '')); // Remove quotes if model adds them
+      const title = await generateTopicFromPapers(savedPapers);
+      setWriteTopic(title.replace(/^["']|["']$/g, '')); // Remove quotes if model adds them
     } catch (e) {
-        console.error("Topic generation failed", e);
+      console.error("Topic generation failed", e);
     } finally {
-        setIsGeneratingTopic(false);
+      setIsGeneratingTopic(false);
     }
   };
 
@@ -391,6 +410,79 @@ const App: React.FC = () => {
     });
   };
 
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files;
+    if (!files || files.length === 0) return;
+
+    const newPapers: Paper[] = [];
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      if (file.type !== 'application/pdf') continue;
+
+      try {
+        const text = await extractTextFromPdf(file);
+        const paperId = `local-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+        const newPaper: Paper = {
+          id: paperId,
+          title: file.name.replace('.pdf', ''),
+          authors: ['Yazar Bilgisi Bekleniyor...'],
+          year: new Date().getFullYear(),
+          // Fix: Initialize abstract as empty until metadata extraction fills it
+          abstract: '',
+          citationCount: 0,
+          source: 'Yerel Dosya',
+          isMock: false,
+          fullText: text,
+          pdfUrl: '' // No URL for local files
+        };
+
+        // Save to indexedDB
+        await savePdfToCache(paperId, file);
+        newPapers.push(newPaper);
+
+        // Background Metadata Extraction
+        extractPaperMetadata(text).then(metadata => {
+          setSavedPapers(prev => prev.map(p => {
+            if (p.id === paperId) {
+              // If metadata has authors, use them. If not, clear the "Waiting..." placeholder.
+              const newAuthors = metadata.authors && metadata.authors.length > 0
+                ? metadata.authors
+                : ['Yazar Bulunamadı'];
+
+              return {
+                ...p,
+                // Safely merge metadata. If metadata.title is undefined/null, keep existing p.title (filename)
+                title: metadata.title || p.title,
+                year: metadata.year || p.year,
+                doi: metadata.doi || p.doi,
+                authors: newAuthors,
+                abstract: metadata.abstract || p.abstract
+              };
+            }
+            return p;
+          }));
+        });
+
+      } catch (error) {
+        console.error(`Error processing file ${file.name}:`, error);
+        alert(`${file.name} işlenirken bir hata oluştu.`);
+      }
+    }
+
+    if (newPapers.length > 0) {
+      setSavedPapers(prev => [...prev, ...newPapers]);
+      // Trigger analysis for the new papers
+      triggerBatchAnalysis(newPapers);
+    }
+
+    // Reset input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
   // Batch Save Functionality
   const handleBatchSave = () => {
     const papersToSave = displayPapers.filter(p => selectedPaperIds.has(p.id));
@@ -401,12 +493,74 @@ const App: React.FC = () => {
       const newPapers = papersToSave.filter(p => !existingIds.has(p.id));
       return [...prev, ...newPapers];
     });
-    
+
     // Clear selection after saving for better UX
     setSelectedPaperIds(new Set());
   };
 
+  const handleAnalyzeAll = () => {
+    if (savedPapers.length === 0) return;
+    triggerBatchAnalysis(savedPapers);
+  };
+
   const isSaved = (id: string) => savedPapers.some(p => p.id === id);
+
+  const handleDeletePaper = async (paperId: string) => {
+    if (!confirm("Bu makaleyi kitaplığınızdan silmek istediğinize emin misiniz?")) return;
+
+    // Remove from savedPapers
+    setSavedPapers(prev => prev.filter(p => p.id !== paperId));
+
+    // Also remove from cache if it exists
+    if (cachedPdfIds.has(paperId)) {
+      await handleDeletePdf(paperId, true);
+    }
+
+    // Deselect if selected
+    if (selectedPaperIds.has(paperId)) {
+      const newSet = new Set(selectedPaperIds);
+      newSet.delete(paperId);
+      setSelectedPaperIds(newSet);
+    }
+
+    // Close modal if open
+    if (selectedPaper?.id === paperId) {
+      setSelectedPaper(null);
+    }
+  };
+
+  const handleBatchDelete = async () => {
+    if (selectedPaperIds.size === 0) return;
+    if (!confirm(`Seçili ${selectedPaperIds.size} makaleyi silmek istediğinize emin misiniz?`)) return;
+
+    const idsToDelete: string[] = Array.from(selectedPaperIds);
+
+    // Remove from savedPapers
+    setSavedPapers(prev => prev.filter(p => !selectedPaperIds.has(p.id)));
+
+    // Remove from cache
+    for (const id of idsToDelete) {
+      if (cachedPdfIds.has(id)) {
+        await handleDeletePdf(id, true); // Skip confirm for batch
+        // Replicating silence logic here for batch:
+        try {
+          await deletePdfFromCache(id);
+        } catch (e) { console.error("Cache delete failed", e); }
+      }
+    }
+
+    // Update cache state
+    setCachedPdfIds(prev => {
+      const newSet = new Set(prev);
+      idsToDelete.forEach(id => newSet.delete(id));
+      return newSet;
+    });
+
+    setSelectedPaperIds(new Set());
+    if (selectedPaper && selectedPaperIds.has(selectedPaper.id)) {
+      setSelectedPaper(null);
+    }
+  };
 
   // Filter Logic
   const getFilteredPapers = (rawPapers: Paper[]) => {
@@ -424,9 +578,9 @@ const App: React.FC = () => {
   const displayPapers = getFilteredPapers(sourcePapers);
 
   const activeFilterCount = [
-    filters.minYear !== '', 
-    filters.maxYear !== '', 
-    filters.minCitations !== '', 
+    filters.minYear !== '',
+    filters.maxYear !== '',
+    filters.minCitations !== '',
     filters.hasPdf
   ].filter(Boolean).length;
 
@@ -467,28 +621,28 @@ const App: React.FC = () => {
       [paper.id]: {
         ...(prev[paper.id] || { paperId: paper.id, summary: '', methodology: '', outcome: '', isLoading: false }),
         [field]: undefined,
-        isLoading: true 
+        isLoading: true
       }
     }));
 
     try {
-      const liveConnection = await checkOllamaConnection();
-      if (!liveConnection) return;
-      
+      const status = await checkAIConnection();
+      if (!status.ollama && !status.gemini) return;
+
       // Try to enrich paper with full text for better analysis if available
       let paperToAnalyze = paper;
       if (cachedPdfIds.has(paper.id) && !paper.fullText) {
-          const enriched = await enrichPapersWithPdfContent([paper]);
-          paperToAnalyze = enriched[0];
+        const enriched = await enrichPapersWithPdfContent([paper]);
+        paperToAnalyze = enriched[0];
       }
-      
+
       // Use full text if available, otherwise abstract
-      const contentToAnalyze = paperToAnalyze.fullText 
-        ? `(Tam Metin):\n${paperToAnalyze.fullText.substring(0, 5000)}` 
+      const contentToAnalyze = paperToAnalyze.fullText
+        ? `(Tam Metin):\n${paperToAnalyze.fullText.substring(0, 5000)}`
         : paperToAnalyze.abstract;
 
       const result = await analyzePaperWithOllama(contentToAnalyze, field);
-      
+
       setAnalyses(prev => ({
         ...prev,
         [paper.id]: {
@@ -499,23 +653,23 @@ const App: React.FC = () => {
       }));
 
     } catch (error) {
-       console.error(`Analysis failed for ${paper.id} field ${field}`);
+      console.error(`Analysis failed for ${paper.id} field ${field}`);
     }
   };
 
   const triggerSynthesis = async (searchQuery: string, currentPapers: Paper[]) => {
     setIsSynthesizing(true);
     try {
-      const liveConnection = await checkOllamaConnection();
-      if (!liveConnection) {
-        setSynthesis("Ollama bağlantısı kurulamadığı için sentez yapılamadı.");
+      const status = await checkAIConnection();
+      if (!status.ollama && !status.gemini) {
+        setSynthesis("AI bağlantısı (Ollama/Gemini) kurulamadığı için sentez yapılamadı.");
         return;
       }
-      
+
       // Enrich top 5 papers for synthesis if possible
       const papersToEnrich = currentPapers.slice(0, 5);
       const enrichedPapers = await enrichPapersWithPdfContent(papersToEnrich);
-      
+
       const result = await synthesizeFindings(searchQuery, enrichedPapers);
       setSynthesis(result);
     } catch (error) {
@@ -527,7 +681,7 @@ const App: React.FC = () => {
 
   const handleExport = () => {
     // If papers are selected, export those. Otherwise, export all visible papers.
-    const targetPapers = selectedPaperIds.size > 0 
+    const targetPapers = selectedPaperIds.size > 0
       ? displayPapers.filter(p => selectedPaperIds.has(p.id))
       : displayPapers;
 
@@ -559,7 +713,7 @@ const App: React.FC = () => {
 
     targetPapers.forEach((paper, index) => {
       const analysis = analyses[paper.id];
-      
+
       latexContent += `\\subsection*{${index + 1}. ${paper.title}}\n`;
       latexContent += `\\textbf{Yazarlar:} ${paper.authors.join(', ')} \\\\\n`;
       latexContent += `\\textbf{Yıl:} ${paper.year} \\\\\n`;
@@ -567,19 +721,19 @@ const App: React.FC = () => {
         latexContent += `\\textbf{DOI:} \\href{https://doi.org/${paper.doi}}{${paper.doi}} \\\\\n`;
       }
       latexContent += `\\textbf{Kaynak:} ${paper.source} \\\\\n\n`;
-      
+
       latexContent += `\\subsubsection*{Özet}\n${paper.abstract}\n\n`;
-      
+
       if (analysis) {
-         if (analysis.summary && visibleColumns.has('summary')) {
-            latexContent += `\\subsubsection*{AI Özeti}\n${analysis.summary}\n\n`;
-         }
-         if (analysis.methodology && visibleColumns.has('methodology')) {
-            latexContent += `\\subsubsection*{Metodoloji}\n${analysis.methodology}\n\n`;
-         }
-         if (analysis.outcome && visibleColumns.has('outcome')) {
-            latexContent += `\\subsubsection*{Bulgular}\n${analysis.outcome}\n\n`;
-         }
+        if (analysis.summary && visibleColumns.has('summary')) {
+          latexContent += `\\subsubsection*{AI Özeti}\n${analysis.summary}\n\n`;
+        }
+        if (analysis.methodology && visibleColumns.has('methodology')) {
+          latexContent += `\\subsubsection*{Metodoloji}\n${analysis.methodology}\n\n`;
+        }
+        if (analysis.outcome && visibleColumns.has('outcome')) {
+          latexContent += `\\subsubsection*{Bulgular}\n${analysis.outcome}\n\n`;
+        }
       }
       latexContent += `\\hrule\n\\vspace{0.5cm}\n\n`;
     });
@@ -603,15 +757,15 @@ const App: React.FC = () => {
 
   return (
     <div className="h-screen flex flex-col bg-white text-gray-900 font-sans overflow-hidden">
-      
+
       {selectedPaper && (
-        <PaperDetailModal 
+        <PaperDetailModal
           paper={selectedPaper}
           analysis={analyses[selectedPaper.id]}
           isOpen={!!selectedPaper}
           onClose={() => setSelectedPaper(null)}
           onAnalyze={(p) => triggerBatchAnalysis([p])}
-          ollamaConnected={!!ollamaStatus}
+          ollamaConnected={aiStatus.ollama || aiStatus.gemini}
           isSaved={isSaved(selectedPaper.id)}
           onToggleSave={() => toggleSavePaper(selectedPaper)}
           isCached={cachedPdfIds.has(selectedPaper.id)}
@@ -626,435 +780,519 @@ const App: React.FC = () => {
       <header className="h-14 border-b border-gray-200 flex items-center px-4 justify-between bg-white z-20 shrink-0 gap-4">
         {/* Left Side: Logo & Search */}
         <div className="flex items-center gap-4 flex-1 min-w-0">
-           <div className="flex items-center gap-2 font-bold text-lg text-gray-800 shrink-0">
-              <div className="bg-purple-600 p-1 rounded text-white"><Sparkles className="w-4 h-4" /></div>
-              <span className="hidden sm:inline">Yerel Elicit</span>
-           </div>
-           
-           {view !== 'write' && (
-               <form onSubmit={handleSearch} className="relative w-full max-w-xl transition-all">
-                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                    <Search className="h-4 w-4 text-gray-400" />
-                  </div>
-                  <input
-                    type="text"
-                    className="block w-full pl-9 pr-8 py-1.5 bg-gray-100 border-transparent focus:bg-white focus:border-purple-500 focus:ring-1 focus:ring-purple-500 rounded-md text-sm placeholder-gray-500 transition-all"
-                    placeholder="Araştırma sorunuzu yazın..."
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                  />
-                  {query && (
-                    <button
-                      type="button"
-                      onClick={clearSearch}
-                      className="absolute right-2 top-2 text-gray-400 hover:text-gray-600"
-                    >
-                      <XCircle className="w-4 h-4" />
-                    </button>
-                  )}
-               </form>
-           )}
+          <div className="flex items-center gap-2 font-bold text-lg text-gray-800 shrink-0">
+            <div className="bg-purple-600 p-1 rounded text-white"><Sparkles className="w-4 h-4" /></div>
+            <span className="hidden sm:inline">Yerel Elicit</span>
+          </div>
+
+          {view !== 'write' && (
+            <form onSubmit={handleSearch} className="relative w-full max-w-xl transition-all">
+              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                <Search className="h-4 w-4 text-gray-400" />
+              </div>
+              <input
+                type="text"
+                className="block w-full pl-9 pr-8 py-1.5 bg-gray-100 border-transparent focus:bg-white focus:border-purple-500 focus:ring-1 focus:ring-purple-500 rounded-md text-sm placeholder-gray-500 transition-all"
+                placeholder="Araştırma sorunuzu yazın..."
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+              {query && (
+                <button
+                  type="button"
+                  onClick={clearSearch}
+                  className="absolute right-2 top-2 text-gray-400 hover:text-gray-600"
+                >
+                  <XCircle className="w-4 h-4" />
+                </button>
+              )}
+            </form>
+          )}
         </div>
 
         {/* Right Side: View Toggles & Status */}
         <div className="flex items-center gap-3 shrink-0">
-            <div className="flex items-center bg-gray-100 p-1 rounded-lg">
-             <button
-                onClick={() => setView('search')}
-                className={`flex items-center gap-2 px-3 py-1 rounded-md text-sm font-medium transition-all ${view === 'search' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-             >
-                <Search className="w-3.5 h-3.5" />
-                <span className="hidden md:inline">Arama</span>
-             </button>
-             <button
-                onClick={() => setView('library')}
-                className={`flex items-center gap-2 px-3 py-1 rounded-md text-sm font-medium transition-all ${view === 'library' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-             >
-                <Library className="w-3.5 h-3.5" />
-                <span className="hidden md:inline">Kitaplığım</span>
-                <span className="bg-gray-200 text-gray-600 px-1.5 py-0.5 rounded-full text-[10px] ml-1">{savedPapers.length}</span>
-             </button>
-             <button
-                onClick={() => setView('write')}
-                className={`flex items-center gap-2 px-3 py-1 rounded-md text-sm font-medium transition-all ${view === 'write' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-             >
-                <PenTool className="w-3.5 h-3.5" />
-                <span className="hidden md:inline">Yazım Asistanı</span>
-             </button>
-           </div>
-           
-           <div className="h-6 w-px bg-gray-200 mx-1 hidden sm:block"></div>
+          <div className="flex items-center bg-gray-100 p-1 rounded-lg">
+            <button
+              onClick={() => setView('search')}
+              className={`flex items-center gap-2 px-3 py-1 rounded-md text-sm font-medium transition-all ${view === 'search' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+            >
+              <Search className="w-3.5 h-3.5" />
+              <span className="hidden md:inline">Arama</span>
+            </button>
+            <button
+              onClick={() => setView('library')}
+              className={`flex items-center gap-2 px-3 py-1 rounded-md text-sm font-medium transition-all ${view === 'library' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+            >
+              <Library className="w-3.5 h-3.5" />
+              <span className="hidden md:inline">Kitaplığım</span>
+              <span className="bg-gray-200 text-gray-600 px-1.5 py-0.5 rounded-full text-[10px] ml-1">{savedPapers.length}</span>
+            </button>
+            <button
+              onClick={() => setView('write')}
+              className={`flex items-center gap-2 px-3 py-1 rounded-md text-sm font-medium transition-all ${view === 'write' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+            >
+              <PenTool className="w-3.5 h-3.5" />
+              <span className="hidden md:inline">Yazım Asistanı</span>
+            </button>
+          </div>
 
-           <div className={`flex items-center px-2 py-1 rounded text-xs font-medium hidden sm:flex ${ollamaStatus ? 'text-green-700 bg-green-50' : 'text-red-700 bg-red-50'}`}>
-             <Database className="w-3 h-3 mr-1.5" />
-             {ollamaStatus ? 'Hazır' : 'Kapalı'}
-           </div>
-           <div className="h-8 w-8 bg-purple-100 rounded-full flex items-center justify-center text-purple-700 font-bold text-xs">
-             Y
-           </div>
+          <div className="h-6 w-px bg-gray-200 mx-1 hidden sm:block"></div>
+
+          <div className="h-6 w-px bg-gray-200 mx-1 hidden sm:block"></div>
+
+          <div className="flex items-center gap-2">
+            <div className="relative group">
+              <div className="flex items-center bg-gray-100 rounded-lg p-0.5 border border-gray-200">
+                <button
+                  onClick={() => setSelectedProvider('auto')}
+                  className={`px-2 py-1 rounded-md text-xs font-medium flex items-center gap-1.5 transition-all ${selectedProvider === 'auto' ? 'bg-white shadow-sm text-gray-800' : 'text-gray-500 hover:text-gray-700'}`}
+                  title="Otomatik: Önce Ollama dener, hata verirse Gemini kullanır."
+                >
+                  <Settings className="w-3 h-3" />
+                  <span className="hidden lg:inline">Oto</span>
+                </button>
+                <button
+                  onClick={() => setSelectedProvider('ollama')}
+                  className={`px-2 py-1 rounded-md text-xs font-medium flex items-center gap-1.5 transition-all ${selectedProvider === 'ollama' ? 'bg-green-50 text-green-700 shadow-sm border border-green-100' : 'text-gray-500 hover:text-gray-700'}`}
+                  title="Sadece Ollama (Yerel) kullanır."
+                >
+                  <Database className="w-3 h-3" />
+                  <span className="hidden lg:inline">Ollama</span>
+                </button>
+                <button
+                  onClick={() => setSelectedProvider('gemini')}
+                  className={`px-2 py-1 rounded-md text-xs font-medium flex items-center gap-1.5 transition-all ${selectedProvider === 'gemini' ? 'bg-blue-50 text-blue-700 shadow-sm border border-blue-100' : 'text-gray-500 hover:text-gray-700'}`}
+                  title="Sadece Gemini API kullanır."
+                >
+                  <Sparkles className="w-3 h-3" />
+                  <span className="hidden lg:inline">Gemini</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Connection Status Indicators (Small Dots) */}
+            <div className="flex flex-col gap-0.5 text-[10px] font-medium leading-none">
+              <div className={`flex items-center gap-1 ${aiStatus.ollama ? 'text-green-600' : 'text-gray-400'}`}>
+                <div className={`w-1.5 h-1.5 rounded-full ${aiStatus.ollama ? 'bg-green-500' : 'bg-gray-300'}`}></div>
+                Local
+              </div>
+              <div className={`flex items-center gap-1 ${aiStatus.gemini ? 'text-blue-600' : 'text-gray-400'}`}>
+                <div className={`w-1.5 h-1.5 rounded-full ${aiStatus.gemini ? 'bg-blue-500' : 'bg-gray-300'}`}></div>
+                Cloud
+              </div>
+            </div>
+
+          </div>
+          <div className="h-8 w-8 bg-purple-100 rounded-full flex items-center justify-center text-purple-700 font-bold text-xs ml-2">
+            Y
+          </div>
         </div>
       </header>
 
       {/* Toolbar - Only show in Search/Library mode */}
       {view !== 'write' && (
         <div className="h-12 border-b border-gray-200 flex items-center px-4 justify-between bg-white shrink-0 relative">
-           <div className="flex items-center gap-2">
-              <ToolbarButton icon={<ArrowUpDown className="w-3.5 h-3.5" />} label="Sırala" />
-              <div className="h-4 w-px bg-gray-300 mx-1"></div>
-              
-              {/* Filter Button & Menu */}
-              <div className="relative" ref={filterMenuRef}>
-                 <button 
-                    onClick={() => setShowFilterMenu(!showFilterMenu)}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors border ${showFilterMenu || activeFilterCount > 0 ? 'bg-purple-50 border-purple-200 text-purple-700' : 'text-gray-600 hover:bg-gray-100 border-transparent hover:border-gray-200'}`}
-                 >
-                    <Filter className="w-3.5 h-3.5" />
-                    Filtrele
-                    {activeFilterCount > 0 && (
-                       <span className="ml-1 px-1.5 py-0.5 bg-purple-600 text-white text-[10px] rounded-full">
-                          {activeFilterCount}
-                       </span>
-                    )}
-                 </button>
+          <div className="flex items-center gap-2">
+            {view === 'library' && (
+              <>
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors text-white bg-purple-600 hover:bg-purple-700 shadow-sm"
+                >
+                  <Upload className="w-3.5 h-3.5" />
+                  Makale Yükle
+                </button>
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  className="hidden"
+                  accept=".pdf"
+                  multiple
+                  onChange={handleFileUpload}
+                />
+                <div className="h-4 w-px bg-gray-300 mx-1"></div>
+                <button
+                  onClick={handleAnalyzeAll}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors text-purple-700 bg-purple-50 hover:bg-purple-100 border border-purple-200"
+                  title="Tüm makaleleri analiz et"
+                >
+                  <Play className="w-3.5 h-3.5 fill-current" />
+                  Tümünü Analiz Et
+                </button>
+                <div className="h-4 w-px bg-gray-300 mx-1"></div>
 
-                 {showFilterMenu && (
-                    <div className="absolute top-full left-0 mt-2 w-72 bg-white rounded-lg shadow-xl border border-gray-200 z-50 animate-in fade-in zoom-in-95 duration-100">
-                       <div className="p-4 space-y-4">
-                          <div className="flex items-center justify-between pb-2 border-b border-gray-100">
-                             <span className="text-xs font-bold text-gray-700 uppercase tracking-wide">Filtreler</span>
-                             <button 
-                                onClick={() => setFilters({ minYear: '', maxYear: '', minCitations: '', hasPdf: false })}
-                                className="text-xs text-purple-600 hover:text-purple-800 font-medium"
-                             >
-                                Temizle
-                             </button>
-                          </div>
+                {selectedPaperIds.size > 0 && (
+                  <>
+                    <button
+                      onClick={handleBatchDelete}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors text-red-700 bg-red-50 hover:bg-red-100 border border-red-200"
+                      title="Seçilenleri Sil"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      Seçilenleri Sil ({selectedPaperIds.size})
+                    </button>
+                    <div className="h-4 w-px bg-gray-300 mx-1"></div>
+                  </>
+                )}
+              </>
+            )}
+            <ToolbarButton icon={<ArrowUpDown className="w-3.5 h-3.5" />} label="Sırala" />
+            <div className="h-4 w-px bg-gray-300 mx-1"></div>
 
-                          {/* Year Filter */}
-                          <div className="space-y-2">
-                             <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
-                                <Calendar className="w-4 h-4 text-gray-400" />
-                                Yıl Aralığı
-                             </label>
-                             <div className="flex items-center gap-2">
-                                <input 
-                                   type="number" 
-                                   placeholder="Min" 
-                                   className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded text-sm focus:outline-none focus:border-purple-500"
-                                   value={filters.minYear}
-                                   onChange={(e) => setFilters(prev => ({ ...prev, minYear: e.target.value ? parseInt(e.target.value) : '' }))}
-                                />
-                                <span className="text-gray-400">-</span>
-                                <input 
-                                   type="number" 
-                                   placeholder="Max" 
-                                   className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded text-sm focus:outline-none focus:border-purple-500"
-                                   value={filters.maxYear}
-                                   onChange={(e) => setFilters(prev => ({ ...prev, maxYear: e.target.value ? parseInt(e.target.value) : '' }))}
-                                />
-                             </div>
-                          </div>
-
-                          {/* Citation Filter */}
-                          <div className="space-y-2">
-                             <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
-                                <Hash className="w-4 h-4 text-gray-400" />
-                                Minimum Atıf
-                             </label>
-                             <input 
-                                type="number" 
-                                placeholder="0" 
-                                className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded text-sm focus:outline-none focus:border-purple-500"
-                                value={filters.minCitations}
-                                onChange={(e) => setFilters(prev => ({ ...prev, minCitations: e.target.value ? parseInt(e.target.value) : '' }))}
-                             />
-                          </div>
-                       </div>
-                    </div>
-                 )}
-              </div>
-
-              {/* Quick PDF Filter */}
-              <button 
-                onClick={() => setFilters(prev => ({ ...prev, hasPdf: !prev.hasPdf }))}
-                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors border ${filters.hasPdf ? 'bg-red-50 border-red-200 text-red-700' : 'text-gray-600 hover:bg-gray-100 border-transparent hover:border-gray-200'}`}
+            {/* Filter Button & Menu */}
+            <div className="relative" ref={filterMenuRef}>
+              <button
+                onClick={() => setShowFilterMenu(!showFilterMenu)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors border ${showFilterMenu || activeFilterCount > 0 ? 'bg-purple-50 border-purple-200 text-purple-700' : 'text-gray-600 hover:bg-gray-100 border-transparent hover:border-gray-200'}`}
               >
-                <FileCheck className="w-3.5 h-3.5" />
-                Sadece PDF
+                <Filter className="w-3.5 h-3.5" />
+                Filtrele
+                {activeFilterCount > 0 && (
+                  <span className="ml-1 px-1.5 py-0.5 bg-purple-600 text-white text-[10px] rounded-full">
+                    {activeFilterCount}
+                  </span>
+                )}
               </button>
 
-              <div className="relative" ref={columnMenuRef}>
-                <button 
-                  onClick={() => setShowColumnMenu(!showColumnMenu)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors border ${showColumnMenu ? 'bg-purple-50 border-purple-200 text-purple-700' : 'text-gray-600 hover:bg-gray-100 border-transparent hover:border-gray-200'}`}
-                >
-                  <Layout className="w-3.5 h-3.5" />
-                  Sütunlar
-                </button>
-                
-                {showColumnMenu && (
-                  <div className="absolute top-full left-0 mt-1 w-48 bg-white rounded-lg shadow-lg border border-gray-200 z-50 py-1 animate-in fade-in zoom-in-95 duration-100">
-                    <div className="px-3 py-2 text-xs font-semibold text-gray-500 uppercase">Görünüm Seçenekleri</div>
-                    {AVAILABLE_COLUMNS.map((col) => (
+              {showFilterMenu && (
+                <div className="absolute top-full left-0 mt-2 w-72 bg-white rounded-lg shadow-xl border border-gray-200 z-50 animate-in fade-in zoom-in-95 duration-100">
+                  <div className="p-4 space-y-4">
+                    <div className="flex items-center justify-between pb-2 border-b border-gray-100">
+                      <span className="text-xs font-bold text-gray-700 uppercase tracking-wide">Filtreler</span>
                       <button
-                        key={col.key}
-                        onClick={() => toggleColumn(col.key)}
-                        className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center justify-between"
+                        onClick={() => setFilters({ minYear: '', maxYear: '', minCitations: '', hasPdf: false })}
+                        className="text-xs text-purple-600 hover:text-purple-800 font-medium"
                       >
-                        <span>{col.label}</span>
-                        {visibleColumns.has(col.key) && <Check className="w-4 h-4 text-purple-600" />}
+                        Temizle
                       </button>
-                    ))}
-                  </div>
-                )}
-              </div>
+                    </div>
 
-              {/* Bulk Save Button */}
-              {selectedPaperIds.size > 0 && (
-                <button 
-                    onClick={handleBatchSave}
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-purple-700 bg-purple-50 hover:bg-purple-100 border border-purple-200 rounded-md transition-colors"
-                >
-                    <Bookmark className="w-3.5 h-3.5" />
-                    Seçilenleri Kaydet ({selectedPaperIds.size})
-                </button>
+                    {/* Year Filter */}
+                    <div className="space-y-2">
+                      <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+                        <Calendar className="w-4 h-4 text-gray-400" />
+                        Yıl Aralığı
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number"
+                          placeholder="Min"
+                          className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded text-sm focus:outline-none focus:border-purple-500"
+                          value={filters.minYear}
+                          onChange={(e) => setFilters(prev => ({ ...prev, minYear: e.target.value ? parseInt(e.target.value) : '' }))}
+                        />
+                        <span className="text-gray-400">-</span>
+                        <input
+                          type="number"
+                          placeholder="Max"
+                          className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded text-sm focus:outline-none focus:border-purple-500"
+                          value={filters.maxYear}
+                          onChange={(e) => setFilters(prev => ({ ...prev, maxYear: e.target.value ? parseInt(e.target.value) : '' }))}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Citation Filter */}
+                    <div className="space-y-2">
+                      <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+                        <Hash className="w-4 h-4 text-gray-400" />
+                        Minimum Atıf
+                      </label>
+                      <input
+                        type="number"
+                        placeholder="0"
+                        className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded text-sm focus:outline-none focus:border-purple-500"
+                        value={filters.minCitations}
+                        onChange={(e) => setFilters(prev => ({ ...prev, minCitations: e.target.value ? parseInt(e.target.value) : '' }))}
+                      />
+                    </div>
+                  </div>
+                </div>
               )}
-              
-              <ToolbarButton onClick={handleExport} icon={<Code className="w-3.5 h-3.5" />} label="LaTeX İndir" />
-           </div>
-           <div className="text-xs text-gray-500">
-              {view === 'search' ? (
-                  // Use filtered count if filters are active
-                  totalResults > 0 ? (
-                    activeFilterCount > 0 
-                       ? `${displayPapers.length} / ${totalResults} sonuç gösteriliyor (Filtreli)`
-                       : `${totalResults} sonuç bulundu`
-                  ) : ''
-              ) : (
-                  `${savedPapers.length} makale kayıtlı`
+            </div>
+
+            {/* Quick PDF Filter */}
+            <button
+              onClick={() => setFilters(prev => ({ ...prev, hasPdf: !prev.hasPdf }))}
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors border ${filters.hasPdf ? 'bg-red-50 border-red-200 text-red-700' : 'text-gray-600 hover:bg-gray-100 border-transparent hover:border-gray-200'}`}
+            >
+              <FileCheck className="w-3.5 h-3.5" />
+              Sadece PDF
+            </button>
+
+            <div className="relative" ref={columnMenuRef}>
+              <button
+                onClick={() => setShowColumnMenu(!showColumnMenu)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors border ${showColumnMenu ? 'bg-purple-50 border-purple-200 text-purple-700' : 'text-gray-600 hover:bg-gray-100 border-transparent hover:border-gray-200'}`}
+              >
+                <Layout className="w-3.5 h-3.5" />
+                Sütunlar
+              </button>
+
+              {showColumnMenu && (
+                <div className="absolute top-full left-0 mt-1 w-48 bg-white rounded-lg shadow-lg border border-gray-200 z-50 py-1 animate-in fade-in zoom-in-95 duration-100">
+                  <div className="px-3 py-2 text-xs font-semibold text-gray-500 uppercase">Görünüm Seçenekleri</div>
+                  {AVAILABLE_COLUMNS.map((col) => (
+                    <button
+                      key={col.key}
+                      onClick={() => toggleColumn(col.key)}
+                      className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center justify-between"
+                    >
+                      <span>{col.label}</span>
+                      {visibleColumns.has(col.key) && <Check className="w-4 h-4 text-purple-600" />}
+                    </button>
+                  ))}
+                </div>
               )}
-           </div>
+            </div>
+
+            {/* Bulk Save Button */}
+            {selectedPaperIds.size > 0 && (
+              <button
+                onClick={handleBatchSave}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-purple-700 bg-purple-50 hover:bg-purple-100 border border-purple-200 rounded-md transition-colors"
+              >
+                <Bookmark className="w-3.5 h-3.5" />
+                Seçilenleri Kaydet ({selectedPaperIds.size})
+              </button>
+            )}
+
+            <ToolbarButton onClick={handleExport} icon={<Code className="w-3.5 h-3.5" />} label="LaTeX İndir" />
+          </div>
+          <div className="text-xs text-gray-500">
+            {view === 'search' ? (
+              // Use filtered count if filters are active
+              totalResults > 0 ? (
+                activeFilterCount > 0
+                  ? `${displayPapers.length} / ${totalResults} sonuç gösteriliyor (Filtreli)`
+                  : `${totalResults} sonuç bulundu`
+              ) : ''
+            ) : (
+              `${savedPapers.length} makale kayıtlı`
+            )}
+          </div>
         </div>
       )}
 
       {/* Main Content Area */}
       <div className="flex-1 flex overflow-hidden">
-        
+
         {view === 'write' ? (
-             // WRITER VIEW
-             <div className="flex-1 flex overflow-hidden">
-                {/* Source Panel */}
-                <div className="w-1/3 min-w-[300px] border-r border-gray-200 bg-gray-50 flex flex-col">
-                   <div className="p-4 border-b border-gray-200 bg-white">
-                      <h3 className="text-sm font-bold text-gray-700 flex items-center gap-2">
-                          <Library className="w-4 h-4" />
-                          Kaynak Listesi ({savedPapers.length})
-                      </h3>
-                      <p className="text-xs text-gray-500 mt-1">Makale yazımı için sadece bu kaynaklar kullanılacaktır.</p>
-                   </div>
-                   <div className="flex-1 overflow-y-auto p-4 space-y-3">
-                      {savedPapers.length === 0 ? (
-                          <div className="text-center p-6 text-gray-400 border-2 border-dashed border-gray-200 rounded-lg">
-                              <BookText className="w-8 h-8 mx-auto mb-2 opacity-50"/>
-                              <p className="text-sm">Kitaplığınız boş.</p>
-                              <button onClick={() => setView('search')} className="text-xs text-purple-600 font-medium hover:underline mt-2">Arama yapıp makale ekleyin</button>
-                          </div>
-                      ) : (
-                          savedPapers.map((paper, idx) => (
-                              <div key={paper.id} className="bg-white p-3 rounded border border-gray-200 shadow-sm text-sm">
-                                  <div className="font-bold text-gray-800 flex gap-2 justify-between">
-                                      <div className="flex gap-2">
-                                        <span className="text-purple-600">[ref{idx + 1}]</span>
-                                        {paper.title}
-                                      </div>
-                                      {paper.fullText && (
-                                        <span className="text-[10px] uppercase font-bold text-green-600 bg-green-50 px-1.5 py-0.5 rounded h-fit whitespace-nowrap">
-                                          Tam Metin
-                                        </span>
-                                      )}
-                                  </div>
-                                  <div className="text-gray-500 text-xs mt-1">
-                                      {paper.authors[0]}, {paper.year}
-                                  </div>
-                              </div>
-                          ))
-                      )}
-                   </div>
-                </div>
-
-                {/* Editor Panel */}
-                <div className="flex-1 flex flex-col bg-white">
-                   <div className="p-6 border-b border-gray-100">
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Makale Konusu / Başlığı</label>
-                      <div className="flex gap-3">
-                         <div className="relative flex-1">
-                            <input 
-                                type="text" 
-                                className="w-full pl-4 pr-10 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
-                                placeholder="Örn: Yapay Zekanın Tıbbi Görüntülemedeki Etkileri"
-                                value={writeTopic}
-                                onChange={(e) => setWriteTopic(e.target.value)}
-                            />
-                            <button
-                                onClick={handleGenerateTopic}
-                                disabled={isGeneratingTopic || savedPapers.length === 0 || !ollamaStatus}
-                                className="absolute right-2 top-1.5 p-1 text-purple-600 hover:bg-purple-50 rounded disabled:opacity-30 disabled:hover:bg-transparent"
-                                title="Kaynaklara göre başlık öner"
-                            >
-                                {isGeneratingTopic ? <Loader2 className="w-4 h-4 animate-spin"/> : <Sparkles className="w-4 h-4"/>}
-                            </button>
-                         </div>
-                         <button 
-                            onClick={handleWritePaper}
-                            disabled={isWriting || savedPapers.length === 0 || !ollamaStatus}
-                            className="bg-purple-600 text-white px-6 py-2 rounded-lg font-medium hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 transition-colors"
-                         >
-                            {isWriting ? <Loader2 className="w-4 h-4 animate-spin"/> : <PenTool className="w-4 h-4"/>}
-                            {isWriting ? 'Yazılıyor...' : 'Taslak Oluştur'}
-                         </button>
+          // WRITER VIEW
+          <div className="flex-1 flex overflow-hidden">
+            {/* Source Panel */}
+            <div className="w-1/3 min-w-[300px] border-r border-gray-200 bg-gray-50 flex flex-col">
+              <div className="p-4 border-b border-gray-200 bg-white">
+                <h3 className="text-sm font-bold text-gray-700 flex items-center gap-2">
+                  <Library className="w-4 h-4" />
+                  Kaynak Listesi ({savedPapers.length})
+                </h3>
+                <p className="text-xs text-gray-500 mt-1">Makale yazımı için sadece bu kaynaklar kullanılacaktır.</p>
+              </div>
+              <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                {savedPapers.length === 0 ? (
+                  <div className="text-center p-6 text-gray-400 border-2 border-dashed border-gray-200 rounded-lg">
+                    <BookText className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                    <p className="text-sm">Kitaplığınız boş.</p>
+                    <button onClick={() => setView('search')} className="text-xs text-purple-600 font-medium hover:underline mt-2">Arama yapıp makale ekleyin</button>
+                  </div>
+                ) : (
+                  savedPapers.map((paper, idx) => (
+                    <div key={paper.id} className="bg-white p-3 rounded border border-gray-200 shadow-sm text-sm">
+                      <div className="font-bold text-gray-800 flex gap-2 justify-between">
+                        <div className="flex gap-2">
+                          <span className="text-purple-600">[ref{idx + 1}]</span>
+                          {paper.title}
+                        </div>
+                        {paper.fullText && (
+                          <span className="text-[10px] uppercase font-bold text-green-600 bg-green-50 px-1.5 py-0.5 rounded h-fit whitespace-nowrap">
+                            Tam Metin
+                          </span>
+                        )}
                       </div>
-                      {!ollamaStatus && <p className="text-xs text-red-500 mt-2 flex items-center gap-1"><AlertCircle className="w-3 h-3"/> Ollama bağlantısı gerekli.</p>}
-                   </div>
+                      <div className="text-gray-500 text-xs mt-1">
+                        {paper.authors[0]}, {paper.year}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
 
-                   <div className="flex-1 overflow-y-auto p-0 bg-gray-50/30">
-                      {generatedPaper ? (
-                          <div className="h-full flex flex-col">
-                              <div className="flex items-center justify-between px-6 py-2 bg-gray-100 border-b border-gray-200">
-                                  <span className="text-xs font-semibold text-gray-500 uppercase">LaTeX Çıktısı</span>
-                                  <div className="flex gap-2">
-                                      <button 
-                                        onClick={() => {
-                                            navigator.clipboard.writeText(generatedPaper);
-                                            alert("Kopyalandı!");
-                                        }}
-                                        className="text-gray-600 hover:text-gray-900 text-xs flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-200"
-                                      >
-                                          <Copy className="w-3 h-3" /> Kopyala
-                                      </button>
-                                      <button 
-                                        onClick={() => downloadStringAsFile(generatedPaper, 'literature_review.tex')}
-                                        className="text-purple-700 bg-purple-100 hover:bg-purple-200 text-xs font-medium flex items-center gap-1 px-3 py-1 rounded transition-colors"
-                                      >
-                                          <Download className="w-3 h-3" /> .tex İndir
-                                      </button>
-                                  </div>
-                              </div>
-                              <textarea 
-                                readOnly
-                                className="flex-1 w-full p-6 font-mono text-sm bg-white text-gray-800 focus:outline-none resize-none"
-                                value={generatedPaper}
-                              />
-                          </div>
-                      ) : (
-                          <div className="h-full flex flex-col items-center justify-center text-gray-400">
-                              <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4">
-                                  <Code className="w-8 h-8 text-gray-300" />
-                              </div>
-                              <h3 className="text-lg font-medium text-gray-600">Henüz Bir Taslak Yok</h3>
-                              <p className="text-sm mt-2 max-w-sm text-center">Konunuzu girin ve sol taraftaki kaynakları kullanarak LaTeX formatında akademik bir makale oluşturun.</p>
-                          </div>
-                      )}
-                   </div>
+            {/* Editor Panel */}
+            <div className="flex-1 flex flex-col bg-white">
+              <div className="p-6 border-b border-gray-100">
+                <label className="block text-sm font-medium text-gray-700 mb-2">Makale Konusu / Başlığı</label>
+                <div className="flex gap-3">
+                  <div className="relative flex-1">
+                    <input
+                      type="text"
+                      className="w-full pl-4 pr-10 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                      placeholder="Örn: Yapay Zekanın Tıbbi Görüntülemedeki Etkileri"
+                      value={writeTopic}
+                      onChange={(e) => setWriteTopic(e.target.value)}
+                    />
+                    <button
+                      onClick={handleGenerateTopic}
+                      disabled={isGeneratingTopic || savedPapers.length === 0 || !(aiStatus.ollama || aiStatus.gemini)}
+                      className="absolute right-2 top-1.5 p-1 text-purple-600 hover:bg-purple-50 rounded disabled:opacity-30 disabled:hover:bg-transparent"
+                      title="Kaynaklara göre başlık öner"
+                    >
+                      {isGeneratingTopic ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                    </button>
+                  </div>
+                  <button
+                    onClick={handleWritePaper}
+                    disabled={isWriting || savedPapers.length === 0 || !(aiStatus.ollama || aiStatus.gemini)}
+                    className="bg-purple-600 text-white px-6 py-2 rounded-lg font-medium hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 transition-colors"
+                  >
+                    {isWriting ? <Loader2 className="w-4 h-4 animate-spin" /> : <PenTool className="w-4 h-4" />}
+                    {isWriting ? 'Yazılıyor...' : 'Taslak Oluştur'}
+                  </button>
                 </div>
-             </div>
+                {(!aiStatus.ollama && !aiStatus.gemini) && <p className="text-xs text-red-500 mt-2 flex items-center gap-1"><AlertCircle className="w-3 h-3" /> AI (Ollama/Gemini) bağlantısı gerekli.</p>}
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-0 bg-gray-50/30">
+                {generatedPaper ? (
+                  <div className="h-full flex flex-col">
+                    <div className="flex items-center justify-between px-6 py-2 bg-gray-100 border-b border-gray-200">
+                      <span className="text-xs font-semibold text-gray-500 uppercase">LaTeX Çıktısı</span>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => {
+                            navigator.clipboard.writeText(generatedPaper);
+                            alert("Kopyalandı!");
+                          }}
+                          className="text-gray-600 hover:text-gray-900 text-xs flex items-center gap-1 px-2 py-1 rounded hover:bg-gray-200"
+                        >
+                          <Copy className="w-3 h-3" /> Kopyala
+                        </button>
+                        <button
+                          onClick={() => downloadStringAsFile(generatedPaper, 'literature_review.tex')}
+                          className="text-purple-700 bg-purple-100 hover:bg-purple-200 text-xs font-medium flex items-center gap-1 px-3 py-1 rounded transition-colors"
+                        >
+                          <Download className="w-3 h-3" /> .tex İndir
+                        </button>
+                      </div>
+                    </div>
+                    <textarea
+                      readOnly
+                      className="flex-1 w-full p-6 font-mono text-sm bg-white text-gray-800 focus:outline-none resize-none"
+                      value={generatedPaper}
+                    />
+                  </div>
+                ) : (
+                  <div className="h-full flex flex-col items-center justify-center text-gray-400">
+                    <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4">
+                      <Code className="w-8 h-8 text-gray-300" />
+                    </div>
+                    <h3 className="text-lg font-medium text-gray-600">Henüz Bir Taslak Yok</h3>
+                    <p className="text-sm mt-2 max-w-sm text-center">Konunuzu girin ve sol taraftaki kaynakları kullanarak LaTeX formatında akademik bir makale oluşturun.</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
         ) : (
-            // SEARCH / LIBRARY TABLE VIEW (Existing)
-            <div className="flex-1 flex flex-col min-w-0 bg-gray-50/50">
-           
-           {/* Empty State - Initial Search */}
-           {view === 'search' && !hasSearched && !isSearching && !searchError && papers.length === 0 && (
+          // SEARCH / LIBRARY TABLE VIEW (Existing)
+          <div className="flex-1 flex flex-col min-w-0 bg-gray-50/50">
+
+            {/* Empty State - Initial Search */}
+            {view === 'search' && !hasSearched && !isSearching && !searchError && papers.length === 0 && (
               <div className="flex-1 flex flex-col items-center justify-center text-gray-400 p-8">
-                  <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4">
-                     <Search className="w-8 h-8 text-gray-300" />
-                  </div>
-                  <h3 className="text-lg font-medium text-gray-600">Araştırmaya Başla</h3>
-                  <p className="text-sm mt-2 max-w-md text-center">Makaleleri analiz etmek, metodolojileri çıkarmak ve sonuçları sentezlemek için bir konu arayın.</p>
-                  
-                  <div className="mt-8 grid grid-cols-2 gap-3 w-full max-w-lg">
-                      <SampleQueryCard query="Kafeinin uyku kalitesine etkisi" onClick={(q) => { setQuery(q); handleSearch(); }} />
-                      <SampleQueryCard query="Yapay zekanın sağlıkta kullanımı" onClick={(q) => { setQuery(q); handleSearch(); }} />
-                  </div>
+                <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4">
+                  <Search className="w-8 h-8 text-gray-300" />
+                </div>
+                <h3 className="text-lg font-medium text-gray-600">Araştırmaya Başla</h3>
+                <p className="text-sm mt-2 max-w-md text-center">Makaleleri analiz etmek, metodolojileri çıkarmak ve sonuçları sentezlemek için bir konu arayın.</p>
+
+                <div className="mt-8 grid grid-cols-2 gap-3 w-full max-w-lg">
+                  <SampleQueryCard query="Kafeinin uyku kalitesine etkisi" onClick={(q) => { setQuery(q); handleSearch(); }} />
+                  <SampleQueryCard query="Yapay zekanın sağlıkta kullanımı" onClick={(q) => { setQuery(q); handleSearch(); }} />
+                </div>
               </div>
-           )}
-           
-           {/* ERROR STATE */}
-           {searchError && (
+            )}
+
+            {/* ERROR STATE */}
+            {searchError && (
               <div className="flex-1 flex flex-col items-center justify-center text-red-500 p-8">
-                 <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mb-4">
-                    <WifiOff className="w-8 h-8 text-red-400" />
-                 </div>
-                 <h3 className="text-lg font-medium text-gray-800">Bağlantı Hatası</h3>
-                 <p className="text-sm mt-2 max-w-md text-center text-gray-600">{searchError}</p>
-                 <button 
-                    onClick={() => handleSearch()}
-                    className="mt-4 px-4 py-2 bg-red-600 text-white rounded-md text-sm font-medium hover:bg-red-700 transition-colors"
-                 >
-                    Tekrar Dene
-                 </button>
+                <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mb-4">
+                  <WifiOff className="w-8 h-8 text-red-400" />
+                </div>
+                <h3 className="text-lg font-medium text-gray-800">Bağlantı Hatası</h3>
+                <p className="text-sm mt-2 max-w-md text-center text-gray-600">{searchError}</p>
+                <button
+                  onClick={() => handleSearch()}
+                  className="mt-4 px-4 py-2 bg-red-600 text-white rounded-md text-sm font-medium hover:bg-red-700 transition-colors"
+                >
+                  Tekrar Dene
+                </button>
               </div>
-           )}
+            )}
 
             {/* Empty State - Library */}
-           {view === 'library' && savedPapers.length === 0 && (
-             <div className="flex-1 flex flex-col items-center justify-center text-gray-400 p-8">
-               <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4">
+            {view === 'library' && savedPapers.length === 0 && (
+              <div className="flex-1 flex flex-col items-center justify-center text-gray-400 p-8">
+                <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4">
                   <Library className="w-8 h-8 text-gray-300" />
-               </div>
-               <h3 className="text-lg font-medium text-gray-600">Kitaplığınız Boş</h3>
-               <p className="text-sm mt-2 max-w-md text-center">Arama sonuçlarından ilgilendiğiniz makaleleri kaydederek burada görüntüleyebilirsiniz.</p>
-             </div>
-           )}
-
-           {/* Empty State - No Search Results Found (Database empty for query) */}
-           {view === 'search' && hasSearched && !isSearching && !searchError && sourcePapers.length === 0 && (
-              <div className="flex-1 flex flex-col items-center justify-center text-gray-400 p-8">
-                  <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4">
-                     <Search className="w-8 h-8 text-gray-300" />
-                  </div>
-                  <h3 className="text-lg font-medium text-gray-600">Sonuç Bulunamadı</h3>
-                  <p className="text-sm mt-2 max-w-md text-center">"{query}" araması için herhangi bir makale bulunamadı. Lütfen farklı anahtar kelimeler deneyin.</p>
-                   <button 
-                      onClick={clearSearch}
-                      className="mt-4 px-4 py-2 bg-white border border-gray-300 rounded text-sm font-medium hover:bg-gray-50 text-gray-700"
-                   >
-                      Aramayı Temizle
-                   </button>
+                </div>
+                <h3 className="text-lg font-medium text-gray-600">Kitaplığınız Boş</h3>
+                <p className="text-sm mt-2 max-w-md text-center">Arama sonuçlarından ilgilendiğiniz makaleleri kaydederek burada görüntüleyebilirsiniz.</p>
               </div>
-           )}
-           
-           {/* Empty State - Filter Result Empty */}
-           {hasSearched && !isSearching && sourcePapers.length > 0 && displayPapers.length === 0 && (
-              <div className="flex-1 flex flex-col items-center justify-center text-gray-400 p-8">
-                 <div className="w-16 h-16 bg-purple-50 rounded-full flex items-center justify-center mb-4">
-                    <Filter className="w-8 h-8 text-purple-300" />
-                 </div>
-                 <h3 className="text-lg font-medium text-gray-600">Sonuç Bulunamadı</h3>
-                 <p className="text-sm mt-2 max-w-md text-center">Seçilen filtreler çok kısıtlayıcı olabilir. Filtreleri temizleyip tekrar deneyin.</p>
-                 <button 
-                    onClick={() => setFilters({ minYear: '', maxYear: '', minCitations: '', hasPdf: false })}
-                    className="mt-4 px-4 py-2 bg-white border border-gray-300 rounded text-sm font-medium hover:bg-gray-50 text-gray-700"
-                 >
-                    Filtreleri Temizle
-                 </button>
-              </div>
-           )}
+            )}
 
-           {(displayPapers.length > 0 || isSearching) && (
-             <div className="flex-1 overflow-auto">
-               <table className="min-w-full divide-y divide-gray-200 border-separate border-spacing-0 table-fixed">
+            {/* Empty State - No Search Results Found (Database empty for query) */}
+            {view === 'search' && hasSearched && !isSearching && !searchError && sourcePapers.length === 0 && (
+              <div className="flex-1 flex flex-col items-center justify-center text-gray-400 p-8">
+                <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4">
+                  <Search className="w-8 h-8 text-gray-300" />
+                </div>
+                <h3 className="text-lg font-medium text-gray-600">Sonuç Bulunamadı</h3>
+                <p className="text-sm mt-2 max-w-md text-center">"{query}" araması için herhangi bir makale bulunamadı. Lütfen farklı anahtar kelimeler deneyin.</p>
+                <button
+                  onClick={clearSearch}
+                  className="mt-4 px-4 py-2 bg-white border border-gray-300 rounded text-sm font-medium hover:bg-gray-50 text-gray-700"
+                >
+                  Aramayı Temizle
+                </button>
+              </div>
+            )}
+
+            {/* Empty State - Filter Result Empty */}
+            {hasSearched && !isSearching && sourcePapers.length > 0 && displayPapers.length === 0 && (
+              <div className="flex-1 flex flex-col items-center justify-center text-gray-400 p-8">
+                <div className="w-16 h-16 bg-purple-50 rounded-full flex items-center justify-center mb-4">
+                  <Filter className="w-8 h-8 text-purple-300" />
+                </div>
+                <h3 className="text-lg font-medium text-gray-600">Sonuç Bulunamadı</h3>
+                <p className="text-sm mt-2 max-w-md text-center">Seçilen filtreler çok kısıtlayıcı olabilir. Filtreleri temizleyip tekrar deneyin.</p>
+                <button
+                  onClick={() => setFilters({ minYear: '', maxYear: '', minCitations: '', hasPdf: false })}
+                  className="mt-4 px-4 py-2 bg-white border border-gray-300 rounded text-sm font-medium hover:bg-gray-50 text-gray-700"
+                >
+                  Filtreleri Temizle
+                </button>
+              </div>
+            )}
+
+            {(displayPapers.length > 0 || isSearching) && (
+              <div className="flex-1 overflow-auto">
+                <table className="min-w-full divide-y divide-gray-200 border-separate border-spacing-0 table-fixed">
                   <thead className="bg-white sticky top-0 z-10 shadow-sm">
                     <tr>
                       <th scope="col" className="w-10 px-3 py-3 border-b border-gray-200">
-                         <div 
-                           className="cursor-pointer text-gray-400 hover:text-gray-600"
-                           onClick={toggleSelectAll}
-                         >
-                           {selectedPaperIds.size > 0 && selectedPaperIds.size === displayPapers.length ? (
-                             <CheckSquare className="w-4 h-4 text-purple-600" />
-                           ) : (
-                             <Square className="w-4 h-4" />
-                           )}
-                         </div>
+                        <div
+                          className="cursor-pointer text-gray-400 hover:text-gray-600"
+                          onClick={toggleSelectAll}
+                        >
+                          {selectedPaperIds.size > 0 && selectedPaperIds.size === displayPapers.length ? (
+                            <CheckSquare className="w-4 h-4 text-purple-600" />
+                          ) : (
+                            <Square className="w-4 h-4" />
+                          )}
+                        </div>
                       </th>
                       {/* Paper Column (Fixed) */}
                       <th scope="col" className="w-[30%] min-w-[300px] px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider border-b border-r border-gray-200 bg-gray-50/50">
@@ -1062,9 +1300,9 @@ const App: React.FC = () => {
                       </th>
                       {/* Dynamic Columns */}
                       {AVAILABLE_COLUMNS.filter(col => visibleColumns.has(col.key)).map((col, idx, arr) => (
-                        <th 
+                        <th
                           key={col.key}
-                          scope="col" 
+                          scope="col"
                           className={`min-w-[250px] px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider border-b border-gray-200 ${idx !== arr.length - 1 ? 'border-r' : ''}`}
                         >
                           {col.label}
@@ -1074,298 +1312,315 @@ const App: React.FC = () => {
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
                     {displayPapers.map((paper) => {
-                       const analysis = analyses[paper.id];
-                       const isSelected = selectedPaperIds.has(paper.id);
-                       const saved = isSaved(paper.id);
-                       const isCached = cachedPdfIds.has(paper.id);
-                       const isDownloading = isDownloadingPdf[paper.id];
+                      const analysis = analyses[paper.id];
+                      const isSelected = selectedPaperIds.has(paper.id);
+                      const saved = isSaved(paper.id);
+                      const isCached = cachedPdfIds.has(paper.id);
+                      const isDownloading = isDownloadingPdf[paper.id];
 
-                       return (
-                         <tr 
-                           key={paper.id} 
-                           onClick={() => setSelectedPaper(paper)}
-                           className={`hover:bg-purple-50/10 group transition-colors cursor-pointer ${isSelected ? 'bg-purple-50/20' : ''}`}
-                         >
-                           <td className="px-3 py-5 align-top border-r border-transparent" onClick={(e) => e.stopPropagation()}>
-                              <div 
-                                className="cursor-pointer pt-1"
-                                onClick={() => toggleSelection(paper.id)}
+                      return (
+                        <tr
+                          key={paper.id}
+                          onClick={() => {
+                            setSelectedPaper(paper);
+                            // Trigger Full Analysis for Modal if missing
+                            triggerSingleAnalysis(paper, 'methodology');
+                            triggerSingleAnalysis(paper, 'outcome');
+                          }}
+                          className={`hover:bg-purple-50/10 group transition-colors cursor-pointer ${isSelected ? 'bg-purple-50/20' : ''}`}
+                        >
+                          <td className="px-3 py-5 align-top border-r border-transparent" onClick={(e) => e.stopPropagation()}>
+                            <div
+                              className="cursor-pointer pt-1"
+                              onClick={() => toggleSelection(paper.id)}
+                            >
+                              {isSelected ? (
+                                <CheckSquare className="w-4 h-4 text-purple-600" />
+                              ) : (
+                                <Square className="w-4 h-4 text-gray-300 group-hover:text-gray-400" />
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-5 py-5 align-top border-r border-gray-100">
+                            <div className="flex flex-col gap-1.5">
+                              <div
+                                className="text-base font-bold text-gray-900 hover:text-purple-600 hover:underline leading-snug"
                               >
-                                {isSelected ? (
-                                  <CheckSquare className="w-4 h-4 text-purple-600" />
-                                ) : (
-                                  <Square className="w-4 h-4 text-gray-300 group-hover:text-gray-400" />
+                                {paper.title}
+                              </div>
+
+                              <div className="text-sm text-gray-500 font-medium">
+                                {paper.authors.slice(0, 3).join(', ')}{paper.authors.length > 3 ? ' et al.' : ''}
+                              </div>
+
+                              <div className="flex flex-wrap items-center gap-2 mt-2">
+                                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600 border border-gray-200">
+                                  {paper.year}
+                                </span>
+                                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600 border border-gray-200">
+                                  {paper.citationCount} atıf
+                                </span>
+                                {paper.doi && (
+                                  <a
+                                    href={`https://doi.org/${paper.doi}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-50 text-blue-600 border border-blue-100 hover:bg-blue-100 hover:underline z-10 relative"
+                                  >
+                                    DOI: {paper.doi.length > 25 ? paper.doi.substring(0, 25) + '...' : paper.doi}
+                                    <ExternalLink className="w-2.5 h-2.5 ml-1" />
+                                  </a>
                                 )}
                               </div>
-                           </td>
-                           <td className="px-5 py-5 align-top border-r border-gray-100">
-                             <div className="flex flex-col gap-1.5">
-                               <div 
-                                 className="text-base font-bold text-gray-900 hover:text-purple-600 hover:underline leading-snug"
-                               >
-                                 {paper.title}
-                               </div>
-                               
-                               <div className="text-sm text-gray-500 font-medium">
-                                 {paper.authors.slice(0, 3).join(', ')}{paper.authors.length > 3 ? ' et al.' : ''}
-                               </div>
-                               
-                               <div className="flex flex-wrap items-center gap-2 mt-2">
-                                 <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600 border border-gray-200">
-                                   {paper.year}
-                                 </span>
-                                 <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600 border border-gray-200">
-                                   {paper.citationCount} atıf
-                                 </span>
-                                 {paper.doi && (
+
+                              <div className="flex items-center gap-3 mt-3 pt-1">
+                                {paper.pdfUrl && (
+                                  view === 'library' || saved ? (
+                                    isCached ? (
+                                      <div className="flex items-center gap-1">
+                                        <button
+                                          onClick={(e) => { e.stopPropagation(); handleOpenLocalPdf(paper.id); }}
+                                          className="flex items-center gap-1.5 text-xs font-bold text-green-700 bg-green-50 px-2 py-1 rounded border border-green-200 hover:bg-green-100 transition-colors z-10 relative"
+                                          title="Yerel PDF Aç"
+                                        >
+                                          <FileCheck className="w-3.5 h-3.5" />
+                                          Yerel PDF
+                                        </button>
+                                        <button
+                                          onClick={(e) => { e.stopPropagation(); handleDeletePdf(paper.id); }}
+                                          className="p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded z-10 relative"
+                                          title="PDF'i Yerelden Sil"
+                                        >
+                                          <Trash2 className="w-3.5 h-3.5" />
+                                        </button>
+                                      </div>
+                                    ) : (
+                                      <button
+                                        onClick={(e) => { e.stopPropagation(); handleDownloadPdf(paper); }}
+                                        disabled={isDownloading}
+                                        className="flex items-center gap-1.5 text-xs font-bold text-purple-600 bg-purple-50 px-2 py-1 rounded border border-purple-100 hover:bg-purple-100 transition-colors z-10 relative disabled:opacity-50"
+                                      >
+                                        {isDownloading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+                                        {isDownloading ? '...' : 'Önbelleğe İndir'}
+                                      </button>
+                                    )
+                                  ) : (
                                     <a
-                                      href={`https://doi.org/${paper.doi}`}
+                                      href={paper.pdfUrl}
                                       target="_blank"
                                       rel="noopener noreferrer"
                                       onClick={(e) => e.stopPropagation()}
-                                      className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-50 text-blue-600 border border-blue-100 hover:bg-blue-100 hover:underline z-10 relative"
+                                      className="flex items-center gap-1.5 text-xs font-bold text-red-600 bg-red-50 px-2 py-1 rounded border border-red-100 hover:bg-red-100 transition-colors z-10 relative"
+                                      title="PDF Bağlantısı"
                                     >
-                                      DOI: {paper.doi.length > 25 ? paper.doi.substring(0, 25) + '...' : paper.doi}
-                                      <ExternalLink className="w-2.5 h-2.5 ml-1" />
+                                      <FileText className="w-3.5 h-3.5" />
+                                      PDF
                                     </a>
-                                 )}
-                               </div>
+                                  )
+                                )}
 
-                               <div className="flex items-center gap-3 mt-3 pt-1">
-                                  {paper.pdfUrl && (
-                                    view === 'library' || saved ? (
-                                        isCached ? (
-                                           <div className="flex items-center gap-1">
-                                              <button 
-                                                onClick={(e) => { e.stopPropagation(); handleOpenLocalPdf(paper.id); }}
-                                                className="flex items-center gap-1.5 text-xs font-bold text-green-700 bg-green-50 px-2 py-1 rounded border border-green-200 hover:bg-green-100 transition-colors z-10 relative"
-                                                title="Yerel PDF Aç"
-                                              >
-                                                <FileCheck className="w-3.5 h-3.5" />
-                                                Yerel PDF
-                                              </button>
-                                              <button
-                                                onClick={(e) => { e.stopPropagation(); handleDeletePdf(paper.id); }}
-                                                className="p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded z-10 relative"
-                                                title="PDF'i Yerelden Sil"
-                                              >
-                                                <Trash2 className="w-3.5 h-3.5" />
-                                              </button>
-                                           </div>
-                                        ) : (
-                                           <button 
-                                             onClick={(e) => { e.stopPropagation(); handleDownloadPdf(paper); }}
-                                             disabled={isDownloading}
-                                             className="flex items-center gap-1.5 text-xs font-bold text-purple-600 bg-purple-50 px-2 py-1 rounded border border-purple-100 hover:bg-purple-100 transition-colors z-10 relative disabled:opacity-50"
-                                           >
-                                              {isDownloading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
-                                              {isDownloading ? '...' : 'Önbelleğe İndir'}
-                                           </button>
-                                        )
-                                    ) : (
-                                       <a 
-                                        href={paper.pdfUrl}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        onClick={(e) => e.stopPropagation()}
-                                        className="flex items-center gap-1.5 text-xs font-bold text-red-600 bg-red-50 px-2 py-1 rounded border border-red-100 hover:bg-red-100 transition-colors z-10 relative"
-                                        title="PDF Bağlantısı"
-                                      >
-                                        <FileText className="w-3.5 h-3.5" />
-                                        PDF
-                                      </a>
-                                    )
-                                  )}
-                                  
-                                  <div className="w-px h-3 bg-gray-300 mx-1"></div>
+                                <div className="w-px h-3 bg-gray-300 mx-1"></div>
 
-                                  <button 
-                                     onClick={(e) => { e.stopPropagation(); setSelectedPaper(paper); }}
-                                     className="flex items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-purple-600 transition-colors px-1 z-10 relative"
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); setSelectedPaper(paper); }}
+                                  className="flex items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-purple-600 transition-colors px-1 z-10 relative"
+                                >
+                                  <BookOpen className="w-3.5 h-3.5" />
+                                  Özet
+                                </button>
+
+                                <div className="flex-1"></div>
+
+                                {view === 'library' ? (
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); handleDeletePaper(paper.id); }}
+                                    className="flex items-center gap-1.5 text-xs font-medium px-2 py-1 rounded transition-colors border z-10 relative text-red-600 bg-red-50 border-red-200 hover:bg-red-100"
+                                    title="Kitaplıktan Sil"
                                   >
-                                     <BookOpen className="w-3.5 h-3.5" />
-                                     Özet
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                    Sil
                                   </button>
-                                  
-                                  <div className="flex-1"></div>
-
-                                  <button 
+                                ) : (
+                                  <button
                                     onClick={(e) => { e.stopPropagation(); toggleSavePaper(paper); }}
                                     className={`flex items-center gap-1.5 text-xs font-medium px-2 py-1 rounded transition-colors border z-10 relative ${saved ? 'text-purple-700 bg-purple-50 border-purple-200' : 'text-gray-400 hover:text-gray-600 border-transparent'}`}
                                   >
                                     <Bookmark className={`w-3.5 h-3.5 ${saved ? 'fill-current' : ''}`} />
                                     {saved ? 'Kaydedildi' : 'Kaydet'}
                                   </button>
-                               </div>
-                             </div>
-                           </td>
-                           
-                           {/* Dynamic Analysis Cells */}
-                           {AVAILABLE_COLUMNS.filter(col => visibleColumns.has(col.key)).map((col, idx, arr) => (
-                             <AnalysisCell 
-                                key={col.key}
-                                content={analysis?.[col.key]} 
-                                isLoading={analysis?.isLoading && !analysis?.[col.key]} 
-                                isLast={idx === arr.length - 1} 
-                             />
-                           ))}
-                         </tr>
-                       );
+                                )}
+                              </div>
+                            </div>
+                          </td>
+
+                          {/* Dynamic Analysis Cells */}
+                          {AVAILABLE_COLUMNS.filter(col => visibleColumns.has(col.key)).map((col, idx, arr) => (
+                            <AnalysisCell
+                              key={col.key}
+                              content={analysis?.[col.key]}
+                              isLoading={analysis?.isLoading && !analysis?.[col.key]}
+                              isLast={idx === arr.length - 1}
+                            />
+                          ))}
+                        </tr>
+                      );
                     })}
-                    
+
                     {/* Loading Skeleton */}
                     {isSearching && view === 'search' && Array.from({ length: 3 }).map((_, i) => (
-                       <tr key={i}>
-                          <td className="p-4"><div className="w-4 h-4 bg-gray-200 rounded animate-pulse"/></td>
-                          <td className="p-5 border-r border-gray-100">
-                             <div className="space-y-3">
-                                <div className="h-5 bg-gray-200 rounded w-11/12 animate-pulse"/>
-                                <div className="h-4 bg-gray-100 rounded w-1/2 animate-pulse"/>
-                                <div className="flex gap-2">
-                                  <div className="h-4 w-12 bg-gray-100 rounded animate-pulse"/>
-                                  <div className="h-4 w-16 bg-gray-100 rounded animate-pulse"/>
-                                </div>
-                             </div>
-                          </td>
-                          {Array.from({ length: visibleColumns.size }).map((_, j) => (
-                             <td key={j} className="p-5"><div className="h-24 bg-gray-50 rounded animate-pulse"/></td>
-                          ))}
-                       </tr>
+                      <tr key={i}>
+                        <td className="p-4"><div className="w-4 h-4 bg-gray-200 rounded animate-pulse" /></td>
+                        <td className="p-5 border-r border-gray-100">
+                          <div className="space-y-3">
+                            <div className="h-5 bg-gray-200 rounded w-11/12 animate-pulse" />
+                            <div className="h-4 bg-gray-100 rounded w-1/2 animate-pulse" />
+                            <div className="flex gap-2">
+                              <div className="h-4 w-12 bg-gray-100 rounded animate-pulse" />
+                              <div className="h-4 w-16 bg-gray-100 rounded animate-pulse" />
+                            </div>
+                          </div>
+                        </td>
+                        {Array.from({ length: visibleColumns.size }).map((_, j) => (
+                          <td key={j} className="p-5"><div className="h-24 bg-gray-50 rounded animate-pulse" /></td>
+                        ))}
+                      </tr>
                     ))}
                   </tbody>
-               </table>
-               
-               {/* Load More Trigger - Only in Search View */}
-               {view === 'search' && papers.length < totalResults && !isSearching && !searchError && (
-                 <div className="p-4 flex justify-center border-t border-gray-200 bg-white">
-                    <button 
+                </table>
+
+                {/* Load More Trigger - Only in Search View */}
+                {view === 'search' && papers.length < totalResults && !isSearching && !searchError && (
+                  <div className="p-4 flex justify-center border-t border-gray-200 bg-white">
+                    <button
                       onClick={handleLoadMore}
                       disabled={isLoadingMore}
                       className="text-sm font-medium text-purple-600 hover:text-purple-700 flex items-center gap-2 px-4 py-2 hover:bg-purple-50 rounded-md transition-colors"
                     >
-                      {isLoadingMore ? <Loader2 className="w-4 h-4 animate-spin"/> : <Plus className="w-4 h-4"/>}
+                      {isLoadingMore ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
                       Daha fazla yükle
                     </button>
-                 </div>
-               )}
-             </div>
-           )}
-        </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Right: Sidebar / Chat - Hide in Write mode to give full width to editor */}
         {view !== 'write' && (
-            <div className={`w-[360px] bg-white border-l border-gray-200 flex flex-col shrink-0 transition-all duration-300 ${sidebarOpen ? 'translate-x-0' : 'translate-x-full hidden'}`}>
-               <div className="h-12 border-b border-gray-200 flex items-center justify-between px-4 bg-gray-50/50 shrink-0">
-                  <span className="text-sm font-semibold text-gray-700 flex items-center gap-2">
-                    <MessageSquare className="w-4 h-4" />
-                    Makalelerle Sohbet
-                  </span>
-                  <button onClick={() => setSidebarOpen(false)} className="text-gray-400 hover:text-gray-600">
-                    <ChevronRight className="w-4 h-4" />
-                  </button>
-               </div>
-               
-               <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                  {/* Pinned Synthesis Box */}
-                  {(hasSearched || synthesis) && (
-                    <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4 shrink-0">
-                       <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3 flex items-center justify-between">
-                          <div className="flex items-center gap-1.5">
-                            <Sparkles className="w-3.5 h-3.5 text-purple-600" />
-                            Sentez
-                          </div>
-                          <span className="bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded text-[10px] normal-case">AI</span>
-                       </div>
-                       
-                       <div className="text-sm text-gray-800 leading-relaxed">
-                          {isSynthesizing ? (
-                             <div className="flex flex-col gap-2 animate-pulse">
-                                <div className="h-3 bg-gray-100 rounded w-full"></div>
-                                <div className="h-3 bg-gray-100 rounded w-5/6"></div>
-                                <div className="h-3 bg-gray-100 rounded w-4/5"></div>
-                                <span className="text-xs text-purple-500 flex items-center gap-1 mt-1">
-                                   <Sparkles className="w-3 h-3" />
-                                   {view === 'search' ? 'Arama sonuçları sentezleniyor...' : 'Kitaplık sentezleniyor...'}
-                                </span>
-                             </div>
-                          ) : synthesis ? (
-                             <div className="space-y-3">
-                                <p className="whitespace-pre-line">{synthesis}</p>
-                                <div className="mt-2 text-xs text-gray-400 border-t pt-2">
-                                   * Listenin başındaki makalelere dayalıdır.
-                                </div>
-                             </div>
-                          ) : (
-                             <div className="text-gray-500 italic text-xs">
-                                {ollamaStatus ? 'Sentez bekleniyor...' : 'Sentez için Ollama gerekli.'}
-                             </div>
-                          )}
-
-                          {ollamaStatus === false && !synthesis && (
-                            <div className="mt-3 p-2 bg-red-50 text-red-700 text-xs rounded flex gap-2">
-                               <AlertCircle className="w-4 h-4 shrink-0" />
-                               Ollama'nın çalıştığından emin olun.
-                            </div>
-                          )}
-                       </div>
-                    </div>
-                  )}
-
-                  {/* Empty Chat State */}
-                  {!hasSearched && chatHistory.length === 0 && (
-                     <div className="flex flex-col items-center justify-center text-center text-gray-400 py-10">
-                        <MessageSquare className="w-8 h-8 mb-2 opacity-50" />
-                        <p className="text-sm">Sonuçlar hakkında sohbet etmek için arama yapın.</p>
-                     </div>
-                  )}
-
-                  {/* Chat Messages */}
-                  {chatHistory.map((msg, idx) => (
-                    <div key={idx} className={`flex gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
-                       <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${msg.role === 'user' ? 'bg-gray-200' : 'bg-purple-100 text-purple-700'}`}>
-                          {msg.role === 'user' ? <User className="w-4 h-4 text-gray-600" /> : <Bot className="w-5 h-5" />}
-                       </div>
-                       <div className={`rounded-lg p-3 text-sm max-w-[85%] ${msg.role === 'user' ? 'bg-gray-100 text-gray-800' : 'bg-white border border-gray-200 text-gray-800 shadow-sm'}`}>
-                          <p className="whitespace-pre-wrap">{msg.content}</p>
-                       </div>
-                    </div>
-                  ))}
-
-                  {isChatLoading && (
-                     <div className="flex gap-3">
-                        <div className="w-8 h-8 rounded-full bg-purple-100 text-purple-700 flex items-center justify-center shrink-0">
-                           <Bot className="w-5 h-5" />
-                        </div>
-                        <div className="bg-white border border-gray-200 rounded-lg p-3 shadow-sm">
-                           <Loader2 className="w-4 h-4 animate-spin text-purple-600" />
-                        </div>
-                     </div>
-                  )}
-                  
-                  <div ref={chatEndRef} />
-               </div>
-
-               {/* Chat Input */}
-               <div className="p-4 border-t border-gray-200 bg-white shrink-0">
-                  <form onSubmit={handleChatSubmit} className="relative">
-                     <input 
-                       type="text" 
-                       value={chatInput}
-                       onChange={(e) => setChatInput(e.target.value)}
-                       className="w-full pl-4 pr-10 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 transition-all"
-                       placeholder="Makaleler hakkında soru sorun..."
-                       disabled={isChatLoading || !ollamaStatus}
-                     />
-                     <button 
-                        type="submit"
-                        disabled={!chatInput.trim() || isChatLoading || !ollamaStatus}
-                        className="absolute right-2 top-2 p-1.5 text-gray-400 hover:text-purple-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                     >
-                        <Send className="w-4 h-4" />
-                     </button>
-                  </form>
-               </div>
+          <div className={`w-[360px] bg-white border-l border-gray-200 flex flex-col shrink-0 transition-all duration-300 ${sidebarOpen ? 'translate-x-0' : 'translate-x-full hidden'}`}>
+            <div className="h-12 border-b border-gray-200 flex items-center justify-between px-4 bg-gray-50/50 shrink-0">
+              <span className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                <MessageSquare className="w-4 h-4" />
+                Makalelerle Sohbet
+              </span>
+              <button onClick={() => setSidebarOpen(false)} className="text-gray-400 hover:text-gray-600">
+                <ChevronRight className="w-4 h-4" />
+              </button>
             </div>
+
+            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              {/* Pinned Synthesis Box */}
+              {(hasSearched || synthesis) && (
+                <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4 shrink-0">
+                  <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3 flex items-center justify-between">
+                    <div className="flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-purple-600" />
+                      Sentez
+                    </div>
+                    <span className="bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded text-[10px] normal-case">AI</span>
+                  </div>
+
+                  <div className="text-sm text-gray-800 leading-relaxed">
+                    {isSynthesizing ? (
+                      <div className="flex flex-col gap-2 animate-pulse">
+                        <div className="h-3 bg-gray-100 rounded w-full"></div>
+                        <div className="h-3 bg-gray-100 rounded w-5/6"></div>
+                        <div className="h-3 bg-gray-100 rounded w-4/5"></div>
+                        <span className="text-xs text-purple-500 flex items-center gap-1 mt-1">
+                          <Sparkles className="w-3 h-3" />
+                          {view === 'search' ? 'Arama sonuçları sentezleniyor...' : 'Kitaplık sentezleniyor...'}
+                        </span>
+                      </div>
+                    ) : synthesis ? (
+                      <div className="space-y-3">
+                        <p className="whitespace-pre-line">{synthesis}</p>
+                        <div className="mt-2 text-xs text-gray-400 border-t pt-2">
+                          * Listenin başındaki makalelere dayalıdır.
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-gray-500 italic text-xs">
+                        {(aiStatus.ollama || aiStatus.gemini) ? 'Sentez bekleniyor...' : 'Sentez için AI bağlantısı gerekli.'}
+                      </div>
+                    )}
+
+                    {(!aiStatus.ollama && !aiStatus.gemini) && !synthesis && (
+                      <div className="mt-3 p-2 bg-red-50 text-red-700 text-xs rounded flex gap-2">
+                        <AlertCircle className="w-4 h-4 shrink-0" />
+                        AI (Ollama/Gemini) bağlantısının çalıştığından emin olun.
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Empty Chat State */}
+              {!hasSearched && chatHistory.length === 0 && (
+                <div className="flex flex-col items-center justify-center text-center text-gray-400 py-10">
+                  <MessageSquare className="w-8 h-8 mb-2 opacity-50" />
+                  <p className="text-sm">Sonuçlar hakkında sohbet etmek için arama yapın.</p>
+                </div>
+              )}
+
+              {/* Chat Messages */}
+              {chatHistory.map((msg, idx) => (
+                <div key={idx} className={`flex gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${msg.role === 'user' ? 'bg-gray-200' : 'bg-purple-100 text-purple-700'}`}>
+                    {msg.role === 'user' ? <User className="w-4 h-4 text-gray-600" /> : <Bot className="w-5 h-5" />}
+                  </div>
+                  <div className={`rounded-lg p-3 text-sm max-w-[85%] ${msg.role === 'user' ? 'bg-gray-100 text-gray-800' : 'bg-white border border-gray-200 text-gray-800 shadow-sm'}`}>
+                    <p className="whitespace-pre-wrap">{msg.content}</p>
+                  </div>
+                </div>
+              ))}
+
+              {isChatLoading && (
+                <div className="flex gap-3">
+                  <div className="w-8 h-8 rounded-full bg-purple-100 text-purple-700 flex items-center justify-center shrink-0">
+                    <Bot className="w-5 h-5" />
+                  </div>
+                  <div className="bg-white border border-gray-200 rounded-lg p-3 shadow-sm">
+                    <Loader2 className="w-4 h-4 animate-spin text-purple-600" />
+                  </div>
+                </div>
+              )}
+
+              <div ref={chatEndRef} />
+            </div>
+
+            {/* Chat Input */}
+            <div className="p-4 border-t border-gray-200 bg-white shrink-0">
+              <form onSubmit={handleChatSubmit} className="relative">
+                <input
+                  type="text"
+                  value={chatInput}
+                  onChange={(e) => setChatInput(e.target.value)}
+                  className="w-full pl-4 pr-10 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 transition-all"
+                  placeholder="Makaleler hakkında soru sorun..."
+                  disabled={isChatLoading || !(aiStatus.ollama || aiStatus.gemini)}
+                />
+                <button
+                  type="submit"
+                  disabled={!chatInput.trim() || isChatLoading || !(aiStatus.ollama || aiStatus.gemini)}
+                  className="absolute right-2 top-2 p-1.5 text-gray-400 hover:text-purple-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  <Send className="w-4 h-4" />
+                </button>
+              </form>
+            </div>
+          </div>
         )}
       </div>
     </div>
@@ -1381,30 +1636,30 @@ const ToolbarButton = ({ icon, label, onClick }: { icon: React.ReactNode, label:
 );
 
 const AnalysisCell: React.FC<{ content?: string, isLoading?: boolean, isLast?: boolean }> = ({ content, isLoading, isLast = false }) => {
-   return (
-      <td className={`px-5 py-5 align-top text-sm text-gray-700 leading-relaxed ${isLast ? '' : 'border-r border-gray-100'}`}>
-         {isLoading ? (
-            <div className="space-y-3 opacity-60">
-               <div className="h-2 bg-gray-200 rounded w-full animate-pulse"/>
-               <div className="h-2 bg-gray-200 rounded w-5/6 animate-pulse"/>
-               <div className="h-2 bg-gray-200 rounded w-4/6 animate-pulse"/>
-            </div>
-         ) : content ? (
-            <div className="line-clamp-[10] whitespace-pre-line">{content}</div>
-         ) : (
-            <span className="text-gray-300 italic">-</span>
-         )}
-      </td>
-   );
+  return (
+    <td className={`px-5 py-5 align-top text-sm text-gray-700 leading-relaxed ${isLast ? '' : 'border-r border-gray-100'}`}>
+      {isLoading ? (
+        <div className="space-y-3 opacity-60">
+          <div className="h-2 bg-gray-200 rounded w-full animate-pulse" />
+          <div className="h-2 bg-gray-200 rounded w-5/6 animate-pulse" />
+          <div className="h-2 bg-gray-200 rounded w-4/6 animate-pulse" />
+        </div>
+      ) : content ? (
+        <div className="line-clamp-[10] whitespace-pre-line">{content}</div>
+      ) : (
+        <span className="text-gray-300 italic">-</span>
+      )}
+    </td>
+  );
 };
 
 const SampleQueryCard = ({ query, onClick }: { query: string, onClick: (q: string) => void }) => (
-   <div 
-     onClick={() => onClick(query)}
-     className="bg-white border border-gray-200 p-3 rounded-lg text-sm text-gray-600 cursor-pointer hover:border-purple-300 hover:shadow-sm transition-all text-center"
-   >
-      {query}
-   </div>
+  <div
+    onClick={() => onClick(query)}
+    className="bg-white border border-gray-200 p-3 rounded-lg text-sm text-gray-600 cursor-pointer hover:border-purple-300 hover:shadow-sm transition-all text-center"
+  >
+    {query}
+  </div>
 );
 
 export default App;

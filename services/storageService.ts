@@ -14,7 +14,7 @@ const openDB = (): Promise<IDBDatabase> => {
       reject('IndexedDB not supported');
       return;
     }
-    
+
     const request = indexedDB.open(DB_NAME, DB_VERSION);
 
     request.onerror = (event) => reject('IndexedDB error: ' + (event.target as any).error);
@@ -86,21 +86,25 @@ export const getCachedPdfIds = async (): Promise<string[]> => {
 export const extractTextFromPdf = async (blob: Blob): Promise<string> => {
   try {
     const arrayBuffer = await blob.arrayBuffer();
-    const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+    const loadingTask = pdfjsLib.getDocument({
+      data: arrayBuffer,
+      cMapUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.379/cmaps/',
+      cMapPacked: true,
+    });
     const pdf = await loadingTask.promise;
-    
+
     let fullText = '';
     // Limit to first 15 pages to ensure we capture intro, methodology and conclusion
     // without parsing entire books which might crash the browser or LLM context.
     const maxPages = Math.min(pdf.numPages, 15);
-    
+
     for (let i = 1; i <= maxPages; i++) {
       const page = await pdf.getPage(i);
       const textContent = await page.getTextContent();
       const pageText = textContent.items.map((item: any) => item.str).join(' ');
-      fullText += `[Sayfa ${i}]\n${pageText}\n\n`;
+      fullText += `${pageText}\n\n`;
     }
-    
+
     return fullText;
   } catch (error) {
     console.error("PDF Parsing failed:", error);
